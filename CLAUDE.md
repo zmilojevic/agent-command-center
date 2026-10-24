@@ -141,7 +141,7 @@ the same day. It replaced the idea of tweaking the GTK `claude-session-manager` 
   working, green = finished and not yet seen (seen = active chat + focused window), nothing when idle, with an
   invisible spacer so titles don't jump. Chats sorted by creation time (newest first); a `/clear` clears the row in
   place: new session id under the hood, old transcript hidden from the sidebar but kept on disk, row keeps its slot via
-  `sessionSortTime`. Collapsed state, open chats and active chat are remembered.
+  `sessionSortTime`. An empty chat (no messages, draft, attachments or transcript on disk — new or just cleared) is closed as soon as another chat (or Welcome) becomes active, so its placeholder row disappears. Collapsed state, open chats and active chat are remembered.
   Deleting a transcript asks no confirmation. "Remove project…" (project context menu) confirms with a dialog,
   then closes its chats, deletes all its transcripts (`sessions:deleteProject`; the `~/.claude/projects/<slug>` dir
   only if left empty, so `memory/` survives) and drops it from pins and `projectOrder`; a pinned project with no
@@ -151,11 +151,11 @@ the same day. It replaced the idea of tweaking the GTK `claude-session-manager` 
   toggles a project or opens a chat. Opening a chat from the sidebar (click, Enter/Space, menu Open/Fork) moves focus to the composer (`focusComposer` in Sidebar; background opens and arrow navigation leave focus alone, and the Composer autofocus still skips while focus is in the sidebar so Delete can move to the next row); typing a printable key on a focused row also moves focus to the composer. Arrow keys pressed anywhere else (not in an input/textarea,
   dialog, dropdown or context menu) also drive the list, starting from the active chat's row (else the first entry). Opening a chat expands its project and scrolls to its row once; later session updates never re-expand/re-scroll, and startup tab restore opens chats in the background so a chat clicked meanwhile keeps the focus.
   `/` outside a text field focuses the search; Down from search enters the list and Up from the first entry returns to it; Delete on a chat row deletes it (closing its chat; a chat with no transcript yet is just closed) and focus moves to the next row; Delete on a project does nothing.
-- Chats section (sidebar): after all projects, always shown ("No recent chats" when empty; hidden only when a search matches nothing in it),
+- Chats section (sidebar): after all projects, always shown (when empty it shows a centered half-width, muted (transparent, grey text) "New chat" button; hidden only when a search matches nothing in it),
   header with a MessageCircle icon, not draggable/pinnable/in `projectOrder`, no path tooltip, same time window/search/sort/dots/keyboard
   navigation; rows are compact (title + time, no chips); its menu only offers New chat. Footer: full-width "New chat" (`Ctrl N`, focuses the
   composer) above "Add project". Welcome's primary button is "New chat" (general), with a plain "New project session…" button opening the dialog.
-- Composer: Enter sends, Shift+Enter newline, Esc while working stops the turn (same as the Stop button; an open picker closes first), Up/Down in an empty composer recall earlier prompts of that chat, `/` opens the command picker, eraser button (also Ctrl+Backspace) = `/clear`,
+- Composer: Enter sends, Shift+Enter newline, Esc while working stops the turn (same as the Stop button; an open picker closes first), Up/Down in an empty composer recall earlier prompts of that chat, `/` opens the command picker, eraser button (also Alt+Delete) = `/clear`,
   messages typed while busy are queued. `@` opens the agent picker (from `supportedAgents()`, `chat:agents`), inserts `@agent-<name>` which the CLI routes to that subagent; mentions render as a muted pill.
 - Changes panel (Ctrl+Shift+G or the `+A −D` button left of the context meter): uncommitted changes of the active
   chat's repo, refreshed on chat activation, after every `result`, on open and via its refresh button. Click a diff
@@ -166,7 +166,7 @@ the same day. It replaced the idea of tweaking the GTK `claude-session-manager` 
   Context meter bar is segmented by category (muted per-category hues on `--chip-l`); popover adds the last
   turn's input / cache read / cache write / output and cache-hit %.
 - Keep cache warm (per chat, by session id): flame button in the composer toolbar and "Keep cache warm" in the row context menu (turning it on for a closed chat opens it in the background); the cache pill gets a small flame while active. `tickKeepWarm` (every 30 s) warms at TTL − min(5 m, 20 % of TTL), only while the chat is idle with nothing pending, never re-warms a cold cache, gives up after 12 h without a real turn (`KEEP_WARM_MAX_IDLE_MS`), pauses while the chat is closed; failures retry after 2 min. Cache time left everywhere = `max(lastAt, warmedAt)`; `/clear` carries the flag to the new session id.
-- Keyboard: Ctrl+N new general chat (project sessions: sidebar project button / "New project session…" on Welcome), Ctrl+Shift+G changes panel, Ctrl+Tab / Ctrl+Shift+Tab cycle through the visible sidebar rows (highlight moves while Ctrl is held, the chat opens on release; Esc cancels), Ctrl+W close active chat, Ctrl+Delete deletes the active chat's transcript (closes it if it has none; inside a text field only when it's the empty composer), Ctrl+Backspace = `/clear` (same text-field rule as Ctrl+Delete), Ctrl+F find, Ctrl+R reload,
+- Keyboard: Ctrl+N new general chat (project sessions: sidebar project button / "New project session…" on Welcome), Ctrl+Shift+G changes panel, Ctrl+Tab / Ctrl+Shift+Tab open the next/previous visible sidebar row on every press (no need to release Ctrl), Ctrl+W / Alt+W delete the active chat's transcript (closes it if it has none; inside a text field only when it's the empty composer), Alt+Delete = `/clear` (same text-field rule), Ctrl+F find, Ctrl+R reload,
   Ctrl+Shift+I DevTools, Esc closes dialogs/pickers/find.
 
 ## Testing without disturbing the user (Hyprland)

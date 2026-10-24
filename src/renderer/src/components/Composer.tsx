@@ -467,7 +467,7 @@ export default function Composer({ chatId }: { chatId: string }) {
             <ImagePlus size={16} />
           </button>
           {!general && (
-            <button className="icon-btn" title="Clear the conversation (/clear)" onClick={() => void clearChat(chatId)}>
+            <button className="icon-btn" title="Clear the conversation (/clear, Alt+Delete)" onClick={() => void clearChat(chatId)}>
               <Eraser size={16} />
             </button>
           )}

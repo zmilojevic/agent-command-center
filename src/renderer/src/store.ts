@@ -921,6 +921,21 @@ function stale(c: Chat, gen: number | undefined): boolean {
   return typeof gen === 'number' && typeof c.gen === 'number' && gen < c.gen
 }
 
+/** A chat with nothing typed, sent or on disk (a non-empty draft keeps it so typed text is never lost). */
+function isEmptyChat(c: Chat, sessions: SessionSummary[]): boolean {
+  return (
+    c.messages.length === 0 &&
+    c.queue.length === 0 &&
+    c.pending.length === 0 &&
+    c.attachments.length === 0 &&
+    c.comments.length === 0 &&
+    !c.draft.trim() &&
+    c.status !== 'running' &&
+    c.status !== 'compacting' &&
+    (!c.sessionId || !sessions.some((x) => x.sessionId === c.sessionId))
+  )
+}
+
 function refreshAfterStart(chatId: string): void {
   // The CLI answers control requests once it is up; fill the context meter
   // before the first turn (the init message only arrives with a turn).
@@ -1071,6 +1086,14 @@ export function wireEvents(): void {
     lastChangesChat = s.activeChatId
     const cwd = s.activeChatId ? s.chats[s.activeChatId]?.cwd : undefined
     if (cwd) void s.refreshChanges(cwd)
+  })
+  // Empty chats leave when they lose the focus (like claude.ai).
+  let lastActiveChat: string | null = null
+  useStore.subscribe((s) => {
+    if (s.activeChatId === lastActiveChat) return
+    const prev = lastActiveChat
+    lastActiveChat = s.activeChatId
+    if (prev && s.chats[prev] && isEmptyChat(s.chats[prev], s.sessions)) useStore.getState().closeTab(prev)
   })
   window.desktop.onAgentEvent(({ chatId, gen, message }) => {
     const before = useStore.getState().chats[chatId]

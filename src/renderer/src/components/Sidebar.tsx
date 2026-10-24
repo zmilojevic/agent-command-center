@@ -308,7 +308,7 @@ export default function Sidebar() {
   // Keyboard navigation over the visible headers and rows (arrows, Home/End); Right/Left
   // expand/collapse a project, Left on a chat jumps to its project. Typing a character
   // hands focus to the composer so the key lands there (except "/", which focuses search).
-  // Up from the first entry returns to the search field; Delete on a chat row deletes it
+  // Up from the first entry returns to the search field; Delete (without Alt) on a chat row deletes it
   // (or just closes a chat without transcript) and focuses the row now at that position.
   const focusables = (root: HTMLElement): HTMLElement[] => [...root.querySelectorAll<HTMLElement>('.group-head, .row')]
   const onListKey = (e: React.KeyboardEvent<HTMLDivElement>): void => {
@@ -358,7 +358,7 @@ export default function Sidebar() {
         }
         return
       case 'Delete': {
-        if (isHead) return
+        if (isHead || e.altKey) return
         const sess = allGroups.flatMap((x) => x.sessions).find((x) => x.sessionId === el.dataset.sid)
         if (!sess) return
         e.preventDefault()
@@ -424,62 +424,49 @@ export default function Sidebar() {
     }
   }, [])
 
-  // Ctrl+Tab / Ctrl+Shift+Tab cycle a highlight over the rendered rows; the chat opens when Ctrl is released.
+  // Ctrl+Tab / Ctrl+Shift+Tab open the next/previous rendered row immediately on every press. While the modifier
+  // stays held, `lastTarget` is the row opened by the previous press (React may not have re-rendered yet).
   const allGroupsRef = useRef(allGroups)
   allGroupsRef.current = allGroups
   const openSessionRef = useRef(openSession)
   openSessionRef.current = openSession
-  const cycleRef = useRef<{ sid: string; release: 'Control' | 'Meta' } | null>(null)
+  const lastTargetRef = useRef<string | null>(null)
   useEffect(() => {
-    const clear = (): void => {
-      cycleRef.current = null
-      scrollRef.current?.querySelectorAll('.row.cycle-target').forEach((el) => el.classList.remove('cycle-target'))
+    const reset = (): void => {
+      lastTargetRef.current = null
     }
     const onDown = (e: KeyboardEvent): void => {
       const root = scrollRef.current
-      if (e.key === 'Escape' && cycleRef.current) {
-        e.preventDefault()
-        e.stopPropagation()
-        clear()
-        return
-      }
       if (e.key !== 'Tab' || !(e.ctrlKey || e.metaKey) || e.altKey || !root) return
       e.preventDefault()
       e.stopPropagation()
       if (document.querySelector('.modal-backdrop, .dd-menu, .context-menu')) return
       const rows = Array.from(root.querySelectorAll<HTMLElement>('.row[data-sid]'))
       if (!rows.length) return
-      const cur = cycleRef.current
-      const from = cur ? rows.findIndex((r) => r.dataset.sid === cur.sid) : rows.findIndex((r) => r.classList.contains('active'))
-      const n = rows.length
-      const next = e.shiftKey ? (from < 0 ? n - 1 : (from - 1 + n) % n) : from < 0 ? 0 : (from + 1) % n
-      root.querySelectorAll('.row.cycle-target').forEach((el) => el.classList.remove('cycle-target'))
-      rows[next].classList.add('cycle-target')
-      rows[next].scrollIntoView({ block: 'nearest' })
-      cycleRef.current = { sid: rows[next].dataset.sid!, release: cur?.release ?? (e.ctrlKey ? 'Control' : 'Meta') }
-    }
-    const onUp = (e: KeyboardEvent): void => {
-      const cur = cycleRef.current
-      if (!cur || e.key !== cur.release) return
       const st = useStore.getState()
       const active = st.activeChatId ? st.chats[st.activeChatId]?.sessionId : undefined
-      clear()
-      if (cur.sid !== active) {
-        const sess = allGroupsRef.current.flatMap((x) => x.sessions).find((x) => x.sessionId === cur.sid)
-        if (sess) {
-          void openSessionRef.current(sess).then(() => requestAnimationFrame(() => focusComposer()))
-          return
-        }
-      }
-      requestAnimationFrame(() => focusComposer())
+      const last = lastTargetRef.current
+      const startSid = last && rows.some((r) => r.dataset.sid === last) ? last : active
+      const from = startSid ? rows.findIndex((r) => r.dataset.sid === startSid) : -1
+      const n = rows.length
+      const next = e.shiftKey ? (from < 0 ? n - 1 : (from - 1 + n) % n) : from < 0 ? 0 : (from + 1) % n
+      const sid = rows[next].dataset.sid!
+      rows[next].scrollIntoView({ block: 'nearest' })
+      lastTargetRef.current = sid
+      if (sid === active) return
+      const sess = allGroupsRef.current.flatMap((x) => x.sessions).find((x) => x.sessionId === sid)
+      if (sess) void openSessionRef.current(sess).then(() => requestAnimationFrame(() => focusComposer()))
+    }
+    const onUp = (e: KeyboardEvent): void => {
+      if (e.key === 'Control' || e.key === 'Meta') reset()
     }
     window.addEventListener('keydown', onDown, true)
     window.addEventListener('keyup', onUp)
-    window.addEventListener('blur', clear)
+    window.addEventListener('blur', reset)
     return () => {
       window.removeEventListener('keydown', onDown, true)
       window.removeEventListener('keyup', onUp)
-      window.removeEventListener('blur', clear)
+      window.removeEventListener('blur', reset)
     }
   }, [])
 
@@ -632,7 +619,21 @@ export default function Sidebar() {
                   <MessageSquarePlus size={14} />
                 </button>
               </div>
-              {!isCollapsed && g.sessions.length === 0 && <div className="muted pad small">No recent chats</div>}
+              {!isCollapsed && g.sessions.length === 0 && (g.general ? (
+                <div className="group-empty">
+                  <button
+                    className="btn"
+                    onClick={() => {
+                      void newGeneralChat()
+                      requestAnimationFrame(() => focusComposer())
+                    }}
+                  >
+                    <MessageSquarePlus size={15} /> New chat
+                  </button>
+                </div>
+              ) : (
+                <div className="muted pad small">No recent chats</div>
+              ))}
               {!isCollapsed &&
                 g.sessions.map((s) => {
                   const chat = openBySession[s.sessionId] ? chats[openBySession[s.sessionId]] : undefined

@@ -403,10 +403,6 @@ kbd {
   background: var(--surface);
   box-shadow: inset 0 0 0 1px var(--border);
 }
-.row.cycle-target {
-  background: var(--surface);
-  box-shadow: inset 0 0 0 1px var(--accent-muted);
-}
 .row-title {
   flex: 1;
   overflow: hidden;
@@ -707,6 +703,25 @@ kbd {
 }
 .btn.wide {
   width: 100%;
+}
+.group-empty {
+  display: flex;
+  justify-content: center;
+  padding: 4px 16px 8px;
+}
+.group-empty .btn {
+  width: 50%;
+  justify-content: center;
+  background: transparent;
+  border-color: color-mix(in srgb, var(--border) 45%, transparent);
+  padding: 4px 14px;
+  color: var(--muted);
+  font-weight: 400;
+}
+.group-empty .btn:hover {
+  background: var(--surface);
+  color: var(--text-2);
+  border-color: var(--border);
 }
 .btn.big {
   padding: 11px 20px;

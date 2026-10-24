@@ -47,7 +47,7 @@ export default function App() {
   }, [loadSessions, restoreTabs])
 
   useEffect(() => {
-    // Shared guard for chat-level global hotkeys (Ctrl+Delete, Ctrl+Backspace): returns the active chat when the
+    // Shared guard for chat-level global hotkeys (Ctrl/Alt+W, Alt+Delete): returns the active chat when the
     // key may fire (no overlay open; inside a text field only for the empty composer), else undefined.
     const chatHotkeyTarget = (e: KeyboardEvent) => {
       const st = useStore.getState()
@@ -79,14 +79,10 @@ export default function App() {
         if (!useStore.getState().activeChatId) return
         if (useStore.getState().findOpen) window.dispatchEvent(new Event('ccd-find-focus'))
         else setFindOpen(true)
-      } else if (mod && e.key.toLowerCase() === 'w') {
+      } else if (!e.shiftKey && e.code === 'KeyW' && (mod ? !e.altKey : e.altKey) && !e.defaultPrevented) {
         e.preventDefault()
-        const id = useStore.getState().activeChatId
-        if (id) closeTab(id)
-      } else if (mod && e.key === 'Delete' && !e.defaultPrevented) {
         const chat = chatHotkeyTarget(e)
         if (!chat) return
-        e.preventDefault()
         const st = useStore.getState()
         const summary = st.sessions.find((x) => x.sessionId === chat.sessionId)
         if (summary) void st.deleteSession(summary)
@@ -94,7 +90,7 @@ export default function App() {
         requestAnimationFrame(() => {
           if (useStore.getState().activeChatId) focusComposer()
         })
-      } else if (mod && e.key === 'Backspace' && !e.defaultPrevented) {
+      } else if (e.altKey && !mod && !e.shiftKey && e.key === 'Delete' && !e.defaultPrevented) {
         const chat = chatHotkeyTarget(e)
         if (!chat) return
         e.preventDefault()
