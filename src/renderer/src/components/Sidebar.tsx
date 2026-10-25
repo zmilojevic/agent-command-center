@@ -1,6 +1,6 @@
 import type React from 'react'
 import { Fragment, useMemo, useRef, useState, useEffect } from 'react'
-import { Plus, Search, Clock, FolderGit2, FolderPlus, ChevronRight, ChevronDown, Pencil, Trash2, GitFork, FolderOpen, Pin, PinOff, MessageSquarePlus, ChevronsDownUp, ChevronsUpDown, XCircle, FolderX, Flame, Snowflake, Check, MessageCircle, GitBranchPlus, Code, SquareTerminal, Smartphone, SlidersHorizontal } from 'lucide-react'
+import { Plus, Search, Clock, FolderGit2, FolderPlus, ChevronRight, ChevronDown, Pencil, Trash2, GitFork, FolderOpen, Pin, PinOff, MessageSquarePlus, ChevronsDownUp, ChevronsUpDown, XCircle, FolderX, Flame, Snowflake, Check, MessageCircle, GitBranchPlus, Code, SquareTerminal, Smartphone, SlidersHorizontal, Workflow } from 'lucide-react'
 import { openFolderInEditor, openTerminalAt } from '../openIn'
 import { useStore, KEEP_WARM_MAX_IDLE_MS, isGeneral } from '../store'
 import { EFFORT_LEVELS, type SessionSummary, type LiveChat, type ModelChoice } from '@shared/types'
@@ -873,6 +873,9 @@ export default function Sidebar() {
           </button>
           <button onClick={() => { void openTerminalAt(groupMenu.g.cwd); setGroupMenu(null) }}>
             <SquareTerminal size={14} /> Open in terminal
+          </button>
+          <button onClick={() => { useStore.getState().openWorkflows(groupMenu.g.cwd); setGroupMenu(null) }}>
+            <Workflow size={14} /> Workflows…
           </button>
             </>
           )}

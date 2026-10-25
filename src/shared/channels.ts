@@ -62,6 +62,11 @@ export const INVOKES = {
   mobileRevoke: 'mobile:revoke',
   getSharedPrefs: 'prefs:get',
   setSharedPref: 'prefs:set',
+  workflowList: 'workflow:list',
+  workflowRead: 'workflow:read',
+  workflowSave: 'workflow:save',
+  workflowDelete: 'workflow:delete',
+  workflowAgents: 'workflow:agents',
 } as const
 
 /** `ipcRenderer.send` methods (fire and forget). */
@@ -109,6 +114,11 @@ export const PHONE_BLOCKED: ReadonlySet<string> = new Set([
   'pty:list',
   'pty:replay',
   'pty:idle',
+  'workflow:list',
+  'workflow:read',
+  'workflow:save',
+  'workflow:delete',
+  'workflow:agents',
 ])
 
 /** Events that never leave the desktop window. */

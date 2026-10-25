@@ -1,5 +1,7 @@
 // Types shared between the Electron main process and the renderer.
 
+import type { WorkflowFile, WorkflowReadResult, WorkflowSaveRequest, WorkflowSaveResult, WorkflowAgent } from './workflow'
+
 export type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan' | 'dontAsk' | 'auto'
 
 export const PERMISSION_MODES: { value: PermissionMode; label: string; hint: string }[] = [
@@ -288,6 +290,13 @@ export interface DesktopApi {
   /** Models available to the account, from a live runner or a temporary idle query (cached 10 min). */
   listAllModels(): Promise<ModelChoice[]>
   listCommands(chatId: string): Promise<SlashCommandInfo[]>
+  /** Saved workflows of a project root (`<root>/.claude/workflows`) and the user dir. */
+  workflowList(root: string): Promise<WorkflowFile[]>
+  workflowRead(path: string): Promise<WorkflowReadResult>
+  workflowSave(req: WorkflowSaveRequest): Promise<WorkflowSaveResult>
+  /** Error string or null. */
+  workflowDelete(path: string): Promise<string | null>
+  workflowAgents(root: string): Promise<WorkflowAgent[]>
   listAgents(chatId: string): Promise<AgentChoice[]>
   warmCache(chatId: string): Promise<boolean>
   requestContext(chatId: string): Promise<void>

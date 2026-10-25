@@ -464,30 +464,33 @@ function mapModels(models: Awaited<ReturnType<Query['supportedModels']>>): Model
   }))
 }
 
+/** Runs fn on a temporary idle query (no turn, nothing persisted) and always closes it. */
+export async function withIdleQuery<T>(cwd: string, log: (s: string) => void, fn: (q: Query) => Promise<T>): Promise<T> {
+  let release!: () => void
+  const gate = new Promise<void>((res) => (release = res))
+  async function* idle(): AsyncGenerator<never> {
+    await gate
+  }
+  const exe = claudeExecutable()
+  const q = query({ prompt: idle(), options: { cwd, persistSession: false, stderr: (d) => log(d), ...(exe ? { pathToClaudeCodeExecutable: exe } : {}) } })
+  try {
+    return await fn(q)
+  } finally {
+    release()
+    try {
+      q.close()
+    } catch {
+      /* already closed */
+    }
+  }
+}
+
 let modelsCache: { at: number; models: ModelChoice[] } | undefined
 
 /** All models of the account: any live runner, else a temporary idle query. Non-empty results are cached for 10 minutes. */
 export async function listAllModels(runners: RunnerRegistry, log: (s: string) => void): Promise<ModelChoice[]> {
   if (modelsCache && Date.now() - modelsCache.at < 600_000) return modelsCache.models
-  const viaTemporaryQuery = async (): Promise<ModelChoice[]> => {
-    let release!: () => void
-    const gate = new Promise<void>((res) => (release = res))
-    async function* idle(): AsyncGenerator<never> {
-      await gate
-    }
-    const exe = claudeExecutable()
-    const q = query({ prompt: idle(), options: { cwd: homedir(), persistSession: false, stderr: (d) => log(d), ...(exe ? { pathToClaudeCodeExecutable: exe } : {}) } })
-    try {
-      return mapModels(await q.supportedModels())
-    } finally {
-      release()
-      try {
-        q.close()
-      } catch {
-        /* already closed */
-      }
-    }
-  }
+  const viaTemporaryQuery = (): Promise<ModelChoice[]> => withIdleQuery(homedir(), log, async (q) => mapModels(await q.supportedModels()))
   const work = (async () => {
     try {
       const m = await runners.any()?.listModels()

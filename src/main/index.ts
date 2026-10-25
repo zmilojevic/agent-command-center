@@ -17,8 +17,10 @@ import { MobileServer } from './mobile'
 import { PtyManager } from './pty'
 import { CHATS_DIR } from './paths'
 import { setupTray, focusWindow } from './tray'
+import { workflowList, workflowRead, workflowSave, workflowDelete, workflowAgents } from './workflows'
 import { resourceFile } from './resources'
 import { loadLoginShellEnv } from './shellEnv'
+import type { WorkflowSaveRequest } from '../shared/workflow'
 import type { StartChatOptions, PermissionResponse, PermissionMode, UserContent, NotifyRequest, Theme, RemoteEnableInfo } from '../shared/types'
 
 // Keep the profile in <appData>/agent-command-center: the packaged productName ("Agent Command Center") must not
@@ -172,6 +174,11 @@ handle('chat:setPermissionMode', (_ctx, chatId: string, mode: PermissionMode) =>
 handle('chat:close', (ctx, chatId: string) => runners.release(chatId, ctx.client))
 handle('chat:models', (_ctx, chatId: string) => runners.get(chatId)?.listModels() ?? [])
 handle('app:models', () => listAllModels(runners, log))
+handle('workflow:list', (_ctx, root: string) => workflowList(root))
+handle('workflow:read', (_ctx, path: string) => workflowRead(path))
+handle('workflow:save', (_ctx, req: WorkflowSaveRequest) => workflowSave(req))
+handle('workflow:delete', (_ctx, path: string) => workflowDelete(path))
+handle('workflow:agents', (_ctx, root: string) => workflowAgents(root, log))
 handle('chat:commands', (_ctx, chatId: string) => runners.get(chatId)?.listCommands() ?? [])
 handle('chat:agents', (_ctx, chatId: string) => runners.get(chatId)?.listAgents() ?? [])
 handle('chat:files', (_ctx, chatId: string, query: string) => runners.get(chatId)?.fileSuggestions(query) ?? [])

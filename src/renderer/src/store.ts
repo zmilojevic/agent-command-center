@@ -2,10 +2,21 @@ import { create } from 'zustand'
 import { immer } from 'zustand/middleware/immer'
 import type { RemoteStateEvent, SessionSummary, LiveChat, PermissionRequest, PermissionMode, ModelChoice, EffortLevel, StartChatOptions, SessionMeta, ChatContext, SlashCommandInfo, AgentChoice, ContentBlock, UserContent, Theme, GitChanges } from '@shared/types'
 import { applySdkMessage, applyTranscript, emptyModel, findTool, type ChatModel, type Block } from './reduce'
+import type { WfGraph, WorkflowFile, WorkflowReadResult, WorkflowScope } from '../../shared/workflow'
 import type { ImageAttachment } from './images'
 import { basename, projectRoot, isPhone } from './util'
 import { SHARED_PREFS } from '../../shared/channels'
 import { ensureTerminal, disposeTerminal, terminalExited, whenTerminalReady, pasteToTerminal, focusTerminal } from './terminals'
+
+/** Working copy of a workflow in the designer (`file` null = not saved yet); `savedKey` is the snapshot the dirty marker compares against. */
+export interface WorkflowDraft {
+  file: WorkflowFile | null
+  scope: WorkflowScope
+  graph: WfGraph | null
+  read?: WorkflowReadResult
+  savedKey: string
+  selected: string | null
+}
 
 export interface QueuedMessage {
   id: string
@@ -84,6 +95,10 @@ interface State {
   /** Open chats, most recently activated first. */
   recent: string[]
   activeChatId: string | null
+  /** Project root whose workflow designer replaces the chat pane (not persisted). */
+  workflowsRoot: string | null
+  /** Unsaved workflow designer drafts per project root (not persisted). */
+  workflowDrafts: Record<string, WorkflowDraft>
   showNewDialog: boolean
   newDialogCwd: string | null
   /** Folder of the general (non-project) chats; '' until the main process has told us. */
@@ -147,6 +162,9 @@ interface State {
   /** A general chat (no project folder) with the last-used model, effort and mode. */
   newGeneralChat(): Promise<void>
   activate(chatId: string | null): void
+  openWorkflows(root: string): void
+  closeWorkflows(): void
+  setWorkflowDraft(root: string, draft: WorkflowDraft | null): void
   closeTab(chatId: string): void
   toggleTerminal(): void
   restoreTerminals(): Promise<void>
@@ -315,6 +333,8 @@ export const useStore = create<State>()(
     tabs: [],
     recent: [],
     activeChatId: null,
+    workflowsRoot: null,
+    workflowDrafts: {},
     showNewDialog: false,
     newDialogCwd: null,
     generalDir: '',
@@ -471,6 +491,7 @@ export const useStore = create<State>()(
           s.recent = [...s.recent.filter((x) => x !== chatId), chatId]
         } else {
           s.activeChatId = chatId
+          s.workflowsRoot = null
           s.recent = [chatId, ...s.recent.filter((x) => x !== chatId)]
         }
       })
@@ -519,6 +540,7 @@ export const useStore = create<State>()(
         }
         s.tabs.push(chatId)
         s.activeChatId = chatId
+        s.workflowsRoot = null
         s.recent = [chatId, ...s.recent.filter((x) => x !== chatId)]
         s.showNewDialog = false
       })
@@ -553,6 +575,7 @@ export const useStore = create<State>()(
         }
         s.tabs.push(chatId)
         s.activeChatId = chatId
+        s.workflowsRoot = null
         s.recent = [chatId, ...s.recent.filter((x) => x !== chatId)]
       })
       const opts: StartChatOptions = { chatId, cwd, permissionMode }
@@ -565,10 +588,30 @@ export const useStore = create<State>()(
     activate(chatId) {
       set((s) => {
         s.activeChatId = chatId
+        if (chatId) s.workflowsRoot = null
         if (chatId && s.chats[chatId]) {
           s.chats[chatId].unread = false
           s.recent = [chatId, ...s.recent.filter((x) => x !== chatId)]
         }
+      })
+    },
+
+    openWorkflows(root) {
+      set((s) => {
+        s.workflowsRoot = root
+      })
+    },
+
+    setWorkflowDraft(root, draft) {
+      set((s) => {
+        if (draft) s.workflowDrafts[root] = draft
+        else delete s.workflowDrafts[root]
+      })
+    },
+
+    closeWorkflows() {
+      set((s) => {
+        s.workflowsRoot = null
       })
     },
 
@@ -1232,6 +1275,7 @@ async function attachLive(chatId: string, o: { background: boolean; title?: stri
     if (o.background) s.recent = [...s.recent.filter((x) => x !== chatId), chatId]
     else {
       s.activeChatId = chatId
+      s.workflowsRoot = null
       s.recent = [chatId, ...s.recent.filter((x) => x !== chatId)]
     }
   })

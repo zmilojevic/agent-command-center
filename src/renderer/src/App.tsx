@@ -12,6 +12,7 @@ import ChangesPanel from './components/ChangesPanel'
 import TerminalPanel from './components/TerminalPanel'
 import RightDock from './components/RightDock'
 import ToolStrip from './components/ToolStrip'
+import WorkflowsView from './components/workflows/WorkflowsView'
 import { initTerminals, focusTerminal, terminalHasFocus, setTerminalEscapeHandler } from './terminals'
 import { isPhone } from './util'
 
@@ -60,6 +61,7 @@ export default function App() {
   const changesOpen = useStore((s) => s.changesOpen)
   const toggleChanges = useStore((s) => s.toggleChanges)
   const terminalOpen = useStore((s) => s.terminalOpen)
+  const workflowsRoot = useStore((s) => s.workflowsRoot)
 
   useEffect(() => {
     wireEvents()
@@ -94,7 +96,7 @@ export default function App() {
     const chatHotkeyTarget = (e: KeyboardEvent) => {
       const st = useStore.getState()
       const chat = st.activeChatId ? st.chats[st.activeChatId] : undefined
-      if (!chat) return undefined
+      if (!chat || st.workflowsRoot) return undefined
       if (document.querySelector('.modal-backdrop, .dd-menu, .context-menu')) return undefined
       const t = e.target instanceof HTMLElement ? e.target : null
       const inText = !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)
@@ -111,6 +113,7 @@ export default function App() {
       if (isToggleTerm) {
         e.preventDefault()
         const st = useStore.getState()
+        if (st.workflowsRoot) return
         const chat = st.activeChatId ? st.chats[st.activeChatId] : undefined
         if (!chat || isGeneral(chat.cwd)) return
         if (!st.terminalOpen) {
@@ -132,13 +135,14 @@ export default function App() {
       } else if (mod && e.shiftKey && e.key.toLowerCase() === 'g') {
         e.preventDefault()
         const st = useStore.getState()
+        if (st.workflowsRoot) return
         if (st.activeChatId && !isGeneral(st.chats[st.activeChatId]?.cwd)) toggleChanges()
       } else if (mod && e.key.toLowerCase() === 'r') {
         e.preventDefault()
         window.desktop.window('reload')
       } else if (mod && !e.shiftKey && e.key.toLowerCase() === 'f') {
         e.preventDefault()
-        if (!useStore.getState().activeChatId) return
+        if (!useStore.getState().activeChatId || useStore.getState().workflowsRoot) return
         if (useStore.getState().findOpen) window.dispatchEvent(new Event('ccd-find-focus'))
         else setFindOpen(true)
       } else if (!e.shiftKey && e.code === 'KeyW' && (mod ? !e.altKey : e.altKey) && !e.defaultPrevented) {
@@ -203,7 +207,12 @@ export default function App() {
       <main className="main">
         <TopBar />
         <div className="main-row">
-          <div className={`chat-pane ${freshGeneral ? 'fresh' : ''}`}>
+          {workflowsRoot && (
+            <ErrorBoundary name="Workflows">
+              <WorkflowsView key={workflowsRoot} root={workflowsRoot} />
+            </ErrorBoundary>
+          )}
+          {!workflowsRoot && <div className={`chat-pane ${freshGeneral ? 'fresh' : ''}`}>
             <ErrorBoundary name="Chat" key={activeChatId ?? 'none'}>
               {activeChatId && (
                 <>
@@ -215,8 +224,8 @@ export default function App() {
                 </>
               )}
             </ErrorBoundary>
-          </div>
-          {!isPhone && activeChatId && !generalActive && (changesOpen || terminalOpen) && (
+          </div>}
+          {!workflowsRoot && !isPhone && activeChatId && !generalActive && (changesOpen || terminalOpen) && (
             <RightDock>
               {changesOpen && (
                 <ErrorBoundary name="Changes" key={`changes-${activeChatId}`}>
@@ -230,7 +239,7 @@ export default function App() {
               )}
             </RightDock>
           )}
-          {!isPhone && activeChatId && !generalActive && (
+          {!workflowsRoot && !isPhone && activeChatId && !generalActive && (
             <ErrorBoundary name="ToolStrip" key={`toolstrip-${activeChatId}`}>
               <ToolStrip />
             </ErrorBoundary>

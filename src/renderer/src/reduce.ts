@@ -378,6 +378,17 @@ function applySystem(model: ChatModel, m: any): void {
         a = { toolUseId: m.tool_use_id ?? m.task_id, description: '', status: 'running', startedAt: Date.now(), toolCalls: 0 }
         model.subagents.push(a)
       }
+      if (a.status !== 'running') {
+        // Resumed with SendMessage: same task_id, new run. Bring it back to the list.
+        a.status = 'running'
+        a.hidden = false
+        a.endedAt = undefined
+        a.activity = undefined
+        a.summary = undefined
+        a.startedAt = Date.now()
+        a.toolCalls = 0
+        a.tokens = undefined
+      }
       a.taskId = m.task_id
       if (m.description) a.description = m.description
       if (m.subagent_type) a.type = m.subagent_type

@@ -166,6 +166,17 @@ the same day. It replaced the idea of tweaking the GTK `claude-session-manager` 
   1M for the Claude 5 family, 200k otherwise, until the CLI reports the real window).
 - `scripts/dev-launch.sh [prod|dev|stop]` and `scripts/ui-driver.mjs <scenario>` (puppeteer-core on port 9333).
 - `CCD_LOG_EVENTS=1` logs raw SDK messages to stderr; `window.__ccd.getState()` exposes the store in DevTools.
+- Workflow designer (design + generated-script format: `docs/workflows.md`): visual editor for Claude Code saved workflows
+  (`<root>/.claude/workflows/<name>.js`, `~/.claude/workflows/<name>.js`). `src/shared/workflow.ts` = graph model (phases = sequential columns,
+  steps in a phase = one `parallel()`, forEach = `pipeline()` + optional N-vote verify, `{{args|step.field|item|prev}}` prompt refs),
+  `generateWorkflow` (script + trailing `/* ccd-workflow-graph v1 <fnv1a> {json} */`), `parseWorkflowFile` (`designer`/`edited` = hash mismatch /
+  `script` = no graph, read-only, meta by regex, never executed), `validateWorkflow`, `availableRefs`. Main `src/main/workflows.ts`: IPC
+  `workflow:list|read|save|delete|agents` (all `PHONE_BLOCKED`; paths limited to the two dirs; atomic write; save conflicts `edited|script|exists`
+  unless `force`; agents = `supportedAgents()` via `withIdleQuery(root)` in agent.ts, tagged project/user by scanning the `agents/*.md` dirs).
+  Renderer: sidebar project menu "Workflows…" → store `workflowsRoot` (any chat activation clears it), `components/workflows/` (list + agent
+  palette, phase-column canvas with HTML5 drag/drop and SVG reference curves, inspector, code view with folded graph data, Run dialog = new
+  project chat sending ``Run the saved workflow `<name>` with args: …`` – the explicit opt-in the Workflow tool needs); unsaved drafts per root
+  in `workflowDrafts` (not persisted); styles `styles/workflows.css` (container queries: inspector floats under 900 px).
 - Phone companion (design: `docs/mobile.md`): the phone is another client of the main process over a WebSocket.
   `src/shared/channels.ts` = single table of every `DesktopApi` method (`INVOKES`/`SENDS`/`EVENTS`) + `PHONE_BLOCKED` (window, theme, folder picker, openPath/editor/terminal, notify, all `pty:*`) and `DESKTOP_ONLY_EVENTS`; the preload and the phone shim are both generated from it, so a new IPC method is added there first. `src/main/ipc.ts`: `handle`/`on` register once (Electron IPC + a map), `dispatch(channel, ctx, args)`, `CallCtx.client` = `'desktop'` | `'phone:<deviceId>'`.
   `RunnerRegistry` keeps `holders` per runner (`start`/`attach` add, `release` removes, closes at none), `list()`/`chat:live` + debounced `chat:liveChanged`, exited runners are skipped, reaper closes phone-only idle runners after 30 min. `chat:send` echoes `chat:remoteMessage {origin,images}` to everyone (clients dedupe by uuid), `respond` emits `permission:cancel`. Renderer: `openSession` attaches (`attachLive`) when `liveChats()` has the session; desktop auto-attaches in the background to events of unknown chats (`closedHere` stops re-attach after a local close); phone re-attaches all chats on `onReconnected`.
@@ -198,6 +209,12 @@ the same day. It replaced the idea of tweaking the GTK `claude-session-manager` 
 - Transcript assistant lines carry `effort`, `perTurnEffort`, `requestedModel`, `gitBranch`, `timestamp`,
   `message.usage`.
 - `askSideQuestion` side questions keep the main prompt cache warm (verified: after 9 min with a 5 m TTL the warmed session read the full 21.6k prefix from cache, the control rewrote ~15k). They emit only `control_request_progress` / `rate_limit_event` stream events (ignored by the reducer) and no transcript lines.
+- Workflows (verified with a designer-generated script): the `Workflow` tool runs a saved one by name (`{name, args}`) and launches it in the
+  background; `agentType` resolves project agents (`.claude/agents`) and `schema` outputs come back as objects. Events: `task_started`
+  (`task_type:'local_workflow'`, `workflow_name`), then `task_progress` per agent start/usage with `description: "<phase>: <label>"` and
+  `last_tool_name: <label>` (cumulative usage), `task_updated` completed, `task_notification`. The tool result names the run's transcript dir
+  (`~/.claude/projects/<slug>/<session>/subagents/workflows/wf_*/`) whose `journal.jsonl` has `{type:'started',agentId,label,phase}` and
+  `{type:'result',agentId,result}` per agent – usable for live per-node status (not built yet).
 - Background tasks: `system/task_started|task_updated|task_notification|background_tasks_changed` carry `task_type` (`local_bash`, `local_agent`, `local_workflow`, `monitor_mcp`, ...). Verified shapes: `task_updated.patch.status` = `killed` after `stopTask`, then `task_notification` `status:'stopped'` with `output_file`, then `background_tasks_changed` with an empty list. `q.getTaskOutput(taskId)` (undocumented, not in the types) returns `{output, total_bytes, truncated}` (last <= 8 KiB, ANSI possible); `stopTask` resolves undefined; `backgroundTasks(toolUseId?)` moves foreground tasks to the background. IPC `chat:taskOutput|stopTask|backgroundTasks`.
 - Slash commands typed by the user go to the CLI unchanged as the user message; `/cost` → `/usage` alias etc.
   Their output is not stored in the transcript.
