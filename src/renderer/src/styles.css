@@ -736,7 +736,7 @@ kbd {
   min-height: 0;
 }
 .chat-col {
-  max-width: 860px;
+  max-width: 1032px;
   margin: 0 auto;
   padding: 28px 24px 12px;
   display: flex;
@@ -1369,7 +1369,7 @@ pre.diff {
   flex-shrink: 0;
 }
 .composer {
-  max-width: 860px;
+  max-width: 1032px;
   margin: 0 auto;
   background: var(--surface);
   border: 1px solid var(--border-2);
@@ -1833,7 +1833,7 @@ pre.diff {
   max-width: 640px;
 }
 .queue {
-  max-width: 860px;
+  max-width: 1032px;
   margin: 0 auto 6px;
   display: flex;
   flex-direction: column;
@@ -2226,6 +2226,12 @@ pre.diff {
 .icon-btn.on {
   background: var(--surface-2);
   color: var(--text);
+}
+.icon-btn.cold,
+.icon-btn.warm.on.cold,
+.icon-btn.on.cold {
+  color: color-mix(in srgb, var(--ask) 80%, var(--muted));
+  opacity: 1;
 }
 .settings-pop {
   position: absolute;

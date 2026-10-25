@@ -104,8 +104,21 @@ export default function App() {
         setFindOpen(false)
       }
     }
+    // Linux/Chromium pastes the primary selection on middle-button mouseup into the focused editable
+    // (e.g. the composer after middle-clicking a sidebar row). A default-prevented mouseup skips that
+    // paste; auxclick still fires. Text fields themselves keep the native behaviour.
+    const onMouseUp = (e: MouseEvent): void => {
+      if (e.button !== 1) return
+      const t = e.target as Element | null
+      if (t?.closest?.('input, textarea, [contenteditable]:not([contenteditable="false"])')) return
+      e.preventDefault()
+    }
     window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    window.addEventListener('mouseup', onMouseUp, true)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('mouseup', onMouseUp, true)
+    }
   }, [newGeneralChat, setShowNewDialog, closeTab, setFindOpen, toggleChanges])
 
   return (

@@ -1,6 +1,6 @@
 import type React from 'react'
 import { Fragment, useMemo, useRef, useState, useEffect } from 'react'
-import { Plus, Search, Clock, FolderGit2, FolderPlus, ChevronRight, ChevronDown, Pencil, Trash2, GitFork, FolderOpen, Pin, PinOff, MessageSquarePlus, ChevronsDownUp, ChevronsUpDown, XCircle, FolderX, Flame, Check, MessageCircle } from 'lucide-react'
+import { Plus, Search, Clock, FolderGit2, FolderPlus, ChevronRight, ChevronDown, Pencil, Trash2, GitFork, FolderOpen, Pin, PinOff, MessageSquarePlus, ChevronsDownUp, ChevronsUpDown, XCircle, FolderX, Flame, Snowflake, Check, MessageCircle } from 'lucide-react'
 import { useStore, KEEP_WARM_MAX_IDLE_MS } from '../store'
 import type { SessionSummary } from '@shared/types'
 import { projectName, relativeTime, shortPath, modelLabel, defaultContextWindow, fmtTokens, fmtElapsed } from '../util'
@@ -619,21 +619,20 @@ export default function Sidebar() {
                   <MessageSquarePlus size={14} />
                 </button>
               </div>
-              {!isCollapsed && g.sessions.length === 0 && (g.general ? (
+              {!isCollapsed && g.sessions.length === 0 && (
                 <div className="group-empty">
                   <button
                     className="btn"
                     onClick={() => {
-                      void newGeneralChat()
+                      if (g.general) void newGeneralChat()
+                      else quickChat(g.cwd)
                       requestAnimationFrame(() => focusComposer())
                     }}
                   >
                     <MessageSquarePlus size={15} /> New chat
                   </button>
                 </div>
-              ) : (
-                <div className="muted pad small">No recent chats</div>
-              ))}
+              )}
               {!isCollapsed &&
                 g.sessions.map((s) => {
                   const chat = openBySession[s.sessionId] ? chats[openBySession[s.sessionId]] : undefined
@@ -655,7 +654,10 @@ export default function Sidebar() {
                           e.preventDefault()
                           setMenu({ x: e.clientX, y: e.clientY, s })
                         }}
-                        onClose={() => chat && closeTab(chat.chatId)}
+                        onDelete={() => {
+                          if (onDisk.has(s.sessionId)) void deleteSession(s)
+                          else if (openBySession[s.sessionId]) closeTab(openBySession[s.sessionId])
+                        }}
                       />
                       {shownAgents.length > 0 && <SubagentList agents={shownAgents} />}
                     </Fragment>
@@ -877,7 +879,7 @@ function SessionRow({
   warmedAt,
   onOpen,
   onMenu,
-  onClose,
+  onDelete,
 }: {
   s: SessionSummary
   chat?: Chat
@@ -891,7 +893,7 @@ function SessionRow({
   warmedAt?: number
   onOpen: () => void
   onMenu: (e: React.MouseEvent) => void
-  onClose: () => void
+  onDelete: () => void
 }) {
   const live = chat && !chat.closed
   const model = (live && chat.model) || meta?.model
@@ -902,6 +904,7 @@ function SessionRow({
   const cacheLast = Math.max(lastAt || 0, warmedAt ?? 0)
   const cacheLeft = cacheLast ? ttl - (now - cacheLast) : -1
   const warm = !!live && keepWarm && !!lastAt && now - lastAt <= KEEP_WARM_MAX_IDLE_MS
+  const frozen = !!live && keepWarm && cacheLeft <= 0
   const cache = cacheLeft > 0 ? `cache · ${Math.max(1, Math.round(cacheLeft / 60_000))}m left` : 'cache cold'
   // Orange-red with nothing left, green from 80% of the lifetime remaining.
   const frac = Math.max(0, Math.min(1, cacheLeft / ttl / 0.8))
@@ -936,10 +939,10 @@ function SessionRow({
         if (e.button === 1) e.preventDefault() // no autoscroll cursor
       }}
       onAuxClick={(e) => {
-        // Middle-click closes an open chat.
-        if (e.button === 1 && live) {
+        // Middle-click = Ctrl+W on this row (delete the transcript, or close a chat that has none).
+        if (e.button === 1) {
           e.preventDefault()
-          onClose()
+          onDelete()
         }
       }}
       title={s.firstPrompt}
@@ -958,7 +961,11 @@ function SessionRow({
           </span>
         )}
         <span className="cache" style={cacheStyle} title={warm ? 'Prompt cache lifetime remaining · kept warm' : 'Prompt cache lifetime remaining'}>
-          {warm && <Flame size={10} style={{ marginRight: 3, verticalAlign: '-1px' }} />}
+          {frozen ? (
+            <Snowflake size={10} style={{ marginRight: 3, verticalAlign: '-1px', color: 'color-mix(in srgb, var(--ask) 80%, var(--muted))' }} />
+          ) : (
+            warm && <Flame size={10} style={{ marginRight: 3, verticalAlign: '-1px' }} />
+          )}
           {cache}
         </span>
         <span className="cache row-model">

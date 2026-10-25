@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, shell, nativeTheme, Notification } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, shell, nativeTheme, nativeImage, Notification } from 'electron'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { existsSync, mkdirSync } from 'node:fs'
@@ -134,12 +134,31 @@ ipcMain.handle('usage:get', (_e, force?: boolean) => usageService!.get(!!force))
 
 // Notifications are kept referenced until dismissed; a collected one loses its click handler.
 const liveNotifications = new Set<Notification>()
+// Claude's logo from the system icon theme (claude-desktop package) if installed, else our own icon.
+const NOTIFY_ICON_CANDIDATES = [
+  '/usr/share/icons/hicolor/256x256/apps/claude-desktop.png',
+  join(app.getAppPath(), 'resources', 'icon.png')
+]
+let notifyIcon: Electron.NativeImage | undefined | null = null
+function notificationIcon(): Electron.NativeImage | undefined {
+  if (notifyIcon !== null) return notifyIcon
+  notifyIcon = undefined
+  for (const path of NOTIFY_ICON_CANDIDATES) {
+    if (!existsSync(path)) continue
+    const img = nativeImage.createFromPath(path)
+    if (!img.isEmpty()) {
+      notifyIcon = img
+      break
+    }
+  }
+  return notifyIcon
+}
 ipcMain.handle('app:notify', (_e, n: NotifyRequest) => {
   if (!Notification.isSupported()) return
   // The renderer's document.hasFocus() stays true on Wayland when the window is on
   // another workspace, so the window manager's view decides.
   if (n.onlyIfUnfocused && win && !win.isDestroyed() && win.isFocused()) return
-  const notif = new Notification({ title: n.title, body: n.body, silent: false })
+  const notif = new Notification({ title: n.title, body: n.body, silent: false, icon: notificationIcon() })
   const drop = (): void => {
     liveNotifications.delete(notif)
   }

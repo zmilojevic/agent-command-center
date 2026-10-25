@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUp, Square, Eraser, X, Clock, ImagePlus, CornerDownLeft, Flame } from 'lucide-react'
+import { ArrowUp, Square, Eraser, X, Clock, ImagePlus, CornerDownLeft, Flame, Snowflake } from 'lucide-react'
 import Dropdown from './Dropdown'
 import ImageThumb from './ImageThumb'
 import { useStore, isGeneral } from '../store'
@@ -75,6 +75,21 @@ export default function Composer({ chatId }: { chatId: string }) {
   const clearChat = useStore((s) => s.clearChat)
   const setKeepWarm = useStore((s) => s.setKeepWarm)
   const keepWarm = useStore((s) => (chat?.sessionId ? s.keepWarm.includes(chat.sessionId) : false))
+  const sid = chat?.sessionId
+  const lastAt = useStore((s) => (sid ? s.chats[chatId]?.lastResponseAt || s.meta[sid]?.lastAt || 0 : 0))
+  const warmedAt = useStore((s) => (sid ? s.warmedAt[sid] ?? 0 : 0))
+  const cacheTtl = useStore((s) => (sid ? s.meta[sid]?.cacheTtlMs : undefined) ?? 300_000)
+  const cacheBusy = chat?.status === 'running' || chat?.status === 'compacting'
+  const coldAt = lastAt ? Math.max(lastAt, warmedAt) + cacheTtl : 0
+  const [, setColdTick] = useState(0)
+  useEffect(() => {
+    if (!coldAt || cacheBusy) return
+    const wait = coldAt - Date.now()
+    if (wait <= 0) return
+    const t = setTimeout(() => setColdTick((n) => n + 1), wait + 50)
+    return () => clearTimeout(t)
+  }, [coldAt, cacheBusy])
+  const cold = !!coldAt && !cacheBusy && Date.now() >= coldAt
   const general = useStore((s) => isGeneral(s.chats[chatId]?.cwd))
   const ta = useRef<HTMLTextAreaElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -456,12 +471,18 @@ export default function Composer({ chatId }: { chatId: string }) {
             }}
           />
           <button
-            className={`icon-btn${keepWarm ? ' on warm' : ''}`}
+            className={`icon-btn${keepWarm ? ' on warm' : ''}${cold ? ' cold' : ''}`}
             disabled={!chat?.sessionId}
-            title={keepWarm ? 'Keeping the prompt cache warm (click to stop)' : 'Keep the prompt cache warm while idle'}
+            title={
+              cold
+                ? 'Prompt cache is cold' + (keepWarm ? ' (keep warm is on; click to stop)' : '')
+                : keepWarm
+                  ? 'Keeping the prompt cache warm (click to stop)'
+                  : 'Keep the prompt cache warm while idle'
+            }
             onClick={() => chat?.sessionId && setKeepWarm(chat.sessionId, !keepWarm)}
           >
-            <Flame size={16} />
+            {cold ? <Snowflake size={16} /> : <Flame size={16} />}
           </button>
           <button className="icon-btn" title="Attach images (or paste / drop them)" onClick={() => fileInput.current?.click()}>
             <ImagePlus size={16} />
