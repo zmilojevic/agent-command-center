@@ -8,6 +8,7 @@ const on = <T>(channel: string) => (cb: (payload: T) => void) => {
 }
 
 const api: DesktopApi = {
+  platform: process.platform,
   listSessions: () => ipcRenderer.invoke('sessions:list'),
   getMessages: (sessionId, cwd) => ipcRenderer.invoke('sessions:messages', sessionId, cwd),
   getSessionMeta: (items) => ipcRenderer.invoke('sessions:meta', items),
@@ -23,6 +24,7 @@ const api: DesktopApi = {
   setPermissionMode: (chatId, mode) => ipcRenderer.invoke('chat:setPermissionMode', chatId, mode),
   closeChat: (chatId) => ipcRenderer.invoke('chat:close', chatId),
   listModels: (chatId) => ipcRenderer.invoke('chat:models', chatId),
+  listAllModels: () => ipcRenderer.invoke('app:models'),
   listCommands: (chatId) => ipcRenderer.invoke('chat:commands', chatId),
   listAgents: (chatId) => ipcRenderer.invoke('chat:agents', chatId),
   warmCache: (chatId) => ipcRenderer.invoke('chat:warm', chatId),

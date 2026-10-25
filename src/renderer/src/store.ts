@@ -108,6 +108,8 @@ interface State {
   recentHours: number
   lastModel: string
   lastEffort: string
+  /** Per project root: default model/effort for new, resumed and worktree chats ('default' = CLI default, absent = follow last used). */
+  projectDefaults: Record<string, ProjectDefaults>
   lastMode: PermissionMode
   lastCwd: string
   notifications: boolean
@@ -135,7 +137,7 @@ interface State {
   loadMeta(items: { sessionId: string; cwd: string }[]): Promise<void>
   /** Open a session in a tab; `background` leaves the active chat alone (startup restore). */
   openSession(s: SessionSummary, fork?: boolean, background?: boolean): Promise<void>
-  newChat(opts: { cwd: string; model: string; permissionMode: PermissionMode }): Promise<void>
+  newChat(opts: { cwd: string; model?: string; permissionMode: PermissionMode }): Promise<void>
   /** A general chat (no project folder) with the last-used model, effort and mode. */
   newGeneralChat(): Promise<void>
   activate(chatId: string | null): void
@@ -186,6 +188,7 @@ interface State {
   deleteSession(s: SessionSummary): Promise<void>
   /** Close its chats, delete all its transcripts, forget pin and order. */
   removeProject(cwd: string): Promise<void>
+  setProjectDefaults(root: string, d: ProjectDefaults | null): void
   /** Display name only; empty or the folder name resets it. */
   renameProject(cwd: string, name: string): void
 }
@@ -237,6 +240,22 @@ export function isGeneral(cwd?: string): boolean {
   return !!cwd && !!dir && cwd === dir
 }
 
+export interface ProjectDefaults {
+  model?: string
+  effort?: string
+}
+
+/** Model a new/resumed chat in this folder starts with: the project's default, else the last used. */
+export function modelFor(cwd: string): string {
+  const st = useStore.getState()
+  return st.projectDefaults[projectRoot(cwd)]?.model ?? st.lastModel
+}
+
+export function effortFor(cwd: string): string {
+  const st = useStore.getState()
+  return st.projectDefaults[projectRoot(cwd)]?.effort ?? st.lastEffort
+}
+
 export const useStore = create<State>()(
   immer((set, get) => ({
     sessions: [],
@@ -273,6 +292,7 @@ export const useStore = create<State>()(
     recentHours: prefs.get('recentHours', 14),
     lastModel: prefs.get('lastModel', 'default'),
     lastEffort: prefs.get('lastEffort', 'default'),
+    projectDefaults: prefs.get<Record<string, ProjectDefaults>>('projectDefaults', {}),
     // Always start sessions with permissions bypassed (--dangerously-skip-permissions).
     lastMode: 'bypassPermissions' as PermissionMode,
     lastCwd: prefs.get('lastCwd', ''),
@@ -368,6 +388,8 @@ export const useStore = create<State>()(
       const chatId = crypto.randomUUID()
       const cwd = sess.cwd || (await window.desktop.homeDir())
       const mode = get().lastMode
+      const model = modelFor(cwd)
+      const effort = effortFor(cwd)
       set((s) => {
         s.chats[chatId] = {
           ...emptyModel(),
@@ -378,8 +400,8 @@ export const useStore = create<State>()(
           sessionId: fork ? undefined : sess.sessionId,
           pending: [],
           models: [],
-          requestedModel: get().lastModel,
-          requestedEffort: get().lastEffort,
+          requestedModel: model,
+          requestedEffort: effort,
           requestedMode: mode,
           transcriptLoaded: false,
           draft: '',
@@ -402,20 +424,22 @@ export const useStore = create<State>()(
         c.transcriptLoaded = true
       })
       const opts: StartChatOptions = { chatId, cwd, permissionMode: mode, resume: sess.sessionId, fork }
-      if (get().lastModel !== 'default') opts.model = get().lastModel
-      if (get().lastEffort !== 'default') opts.effort = get().lastEffort as EffortLevel
+      if (model !== 'default') opts.model = model
+      if (effort !== 'default') opts.effort = effort as EffortLevel
       await startRunner(chatId, opts)
       refreshAfterStart(chatId)
     },
 
-    async newChat({ cwd, model, permissionMode }) {
+    async newChat({ cwd, model: picked, permissionMode }) {
       const chatId = crypto.randomUUID()
-      prefs.set('lastModel', model)
+      const model = picked ?? modelFor(cwd)
+      const effort = effortFor(cwd)
+      if (picked !== undefined) prefs.set('lastModel', model)
       prefs.set('lastMode', permissionMode)
       const rootCwd = projectRoot(cwd)
       prefs.set('lastCwd', rootCwd)
       set((s) => {
-        s.lastModel = model
+        if (picked !== undefined) s.lastModel = model
         s.lastMode = permissionMode
         s.lastCwd = rootCwd
         s.chats[chatId] = {
@@ -428,7 +452,7 @@ export const useStore = create<State>()(
           pending: [],
           models: [],
           requestedModel: model,
-          requestedEffort: get().lastEffort,
+          requestedEffort: effort,
           requestedMode: permissionMode,
           transcriptLoaded: true,
           draft: '',
@@ -442,7 +466,7 @@ export const useStore = create<State>()(
       })
       const opts: StartChatOptions = { chatId, cwd, permissionMode }
       if (model !== 'default') opts.model = model
-      if (get().lastEffort !== 'default') opts.effort = get().lastEffort as EffortLevel
+      if (effort !== 'default') opts.effort = effort as EffortLevel
       await startRunner(chatId, opts)
       refreshAfterStart(chatId)
     },
@@ -496,7 +520,7 @@ export const useStore = create<State>()(
         delete s.chats[chatId]
         s.tabs = s.tabs.filter((t) => t !== chatId)
         s.recent = s.recent.filter((t) => t !== chatId && s.tabs.includes(t))
-        // Fall back to the chat used most recently before this one, else the welcome screen.
+        // Fall back to the chat used most recently before this one, else an empty pane.
         if (s.activeChatId === chatId) s.activeChatId = s.recent[0] ?? null
         if (s.activeChatId && s.chats[s.activeChatId]) s.chats[s.activeChatId].unread = false
       })
@@ -956,7 +980,7 @@ export const useStore = create<State>()(
 
     pinProject(dir) {
       set((s) => {
-        const d = dir.replace(/\/+$/, '')
+        const d = dir.replace(/[\\/]+$/, '')
         if (!s.pinnedProjects.includes(d)) s.pinnedProjects.push(d)
         prefs.set('pinnedProjects', s.pinnedProjects)
         placeAfterPinned(s, d)
@@ -1033,6 +1057,16 @@ export const useStore = create<State>()(
         prefs.set('projectOrder', s.projectOrder)
         delete s.projectNames[cwd]
         prefs.set('projectNames', s.projectNames)
+        delete s.projectDefaults[cwd]
+        prefs.set('projectDefaults', s.projectDefaults)
+      })
+    },
+
+    setProjectDefaults(root, d) {
+      set((s) => {
+        if (d && (d.model || d.effort)) s.projectDefaults[root] = { ...(d.model ? { model: d.model } : {}), ...(d.effort ? { effort: d.effort } : {}) }
+        else delete s.projectDefaults[root]
+        prefs.set('projectDefaults', s.projectDefaults)
       })
     },
 

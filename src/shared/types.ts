@@ -227,6 +227,8 @@ export interface RemoteEnableInfo {
 }
 
 export interface DesktopApi {
+  /** `process.platform` of the host (linux, darwin, win32). */
+  platform: string
   listSessions(): Promise<SessionSummary[]>
   getMessages(sessionId: string, cwd?: string): Promise<TranscriptMessage[]>
   getSessionMeta(items: { sessionId: string; cwd: string }[]): Promise<SessionMeta[]>
@@ -245,6 +247,8 @@ export interface DesktopApi {
   setPermissionMode(chatId: string, mode: PermissionMode): Promise<void>
   closeChat(chatId: string): Promise<void>
   listModels(chatId: string): Promise<ModelChoice[]>
+  /** Models available to the account, from a live runner or a temporary idle query (cached 10 min). */
+  listAllModels(): Promise<ModelChoice[]>
   listCommands(chatId: string): Promise<SlashCommandInfo[]>
   listAgents(chatId: string): Promise<AgentChoice[]>
   warmCache(chatId: string): Promise<boolean>

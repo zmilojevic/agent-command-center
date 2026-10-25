@@ -79,7 +79,7 @@ function splitChunks(out: string): string[] {
 export async function gitChanges(cwd: string): Promise<GitChanges> {
   let root: string
   try {
-    root = (await git(cwd, ['rev-parse', '--show-toplevel'])).trim()
+    root = resolve((await git(cwd, ['rev-parse', '--show-toplevel'])).trim())
   } catch {
     return { isRepo: false, files: [] }
   }
@@ -145,7 +145,7 @@ export async function createWorktree(cwd: string, name: string): Promise<{ path:
       return { error: 'Use 1-60 letters, digits, dots, dashes or underscores.' }
     }
     // Always the main checkout, even when cwd is itself inside a linked worktree.
-    const common = (await git(cwd, ['rev-parse', '--path-format=absolute', '--git-common-dir'])).trim()
+    const common = resolve((await git(cwd, ['rev-parse', '--path-format=absolute', '--git-common-dir'])).trim())
     const root = dirname(common)
     const path = join(root, '.claude', 'worktrees', name)
     if (existsSync(path)) return { error: `A worktree named "${name}" already exists.` }
@@ -172,7 +172,7 @@ export async function createWorktree(cwd: string, name: string): Promise<{ path:
 /** Removes the worktree folder (branch stays). Runs from the main repo root, not from the worktree itself. */
 export async function removeWorktree(path: string, force: boolean): Promise<{ error?: string }> {
   try {
-    const common = (await git(path, ['rev-parse', '--path-format=absolute', '--git-common-dir'])).trim()
+    const common = resolve((await git(path, ['rev-parse', '--path-format=absolute', '--git-common-dir'])).trim())
     await git(dirname(common), ['worktree', 'remove', ...(force ? ['--force'] : []), path])
     return {}
   } catch (e) {
@@ -183,7 +183,7 @@ export async function removeWorktree(path: string, force: boolean): Promise<{ er
 // ---- changes actions: staging, discard ----------------------------------------------------------
 
 async function repoRoot(cwd: string): Promise<string> {
-  return (await git(cwd, ['rev-parse', '--show-toplevel'])).trim()
+  return resolve((await git(cwd, ['rev-parse', '--show-toplevel'])).trim())
 }
 
 async function hasHead(root: string): Promise<boolean> {

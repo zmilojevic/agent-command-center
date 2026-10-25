@@ -1,7 +1,7 @@
 import pty from 'node-pty'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { basename } from 'node:path'
+import { basename, join, delimiter } from 'node:path'
 import type { PtyInfo } from '../shared/types'
 
 const RING_MAX = 200 * 1024
@@ -22,6 +22,18 @@ interface Term {
   timer: NodeJS.Timeout | null
 }
 
+function pickShell(): { shell: string; args: string[] } {
+  if (process.platform === 'darwin') return { shell: process.env.SHELL || '/bin/zsh', args: ['-l'] }
+  if (process.platform === 'win32') {
+    for (const d of (process.env.PATH ?? '').split(delimiter).filter(Boolean)) {
+      const p = join(d, 'pwsh.exe')
+      if (existsSync(p)) return { shell: p, args: [] }
+    }
+    return { shell: join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'), args: [] }
+  }
+  return { shell: process.env.SHELL || '/bin/bash', args: [] }
+}
+
 /** Integrated terminals: one node-pty process per id, output batched to the renderer. */
 export class PtyManager {
   private terms = new Map<string, Term>()
@@ -30,18 +42,20 @@ export class PtyManager {
   constructor(private emit: (channel: string, payload: unknown) => void) {}
 
   create(cwd: string, cols: number, rows: number): string {
-    const shell = process.env.SHELL || '/bin/bash'
+    const { shell, args } = pickShell()
     const env: Record<string, string> = {}
     for (const [k, v] of Object.entries(process.env)) {
       if (v === undefined || k.startsWith('ELECTRON_') || k.startsWith('CCD_') || k === 'CHROME_DESKTOP') continue
       env[k] = v
     }
-    env.TERM = 'xterm-256color'
-    env.COLORTERM = 'truecolor'
+    if (process.platform !== 'win32') {
+      env.TERM = 'xterm-256color'
+      env.COLORTERM = 'truecolor'
+    }
     const dir = cwd && existsSync(cwd) ? cwd : homedir()
-    const proc = pty.spawn(shell, [], { name: 'xterm-256color', cols: Math.max(2, cols), rows: Math.max(1, rows), cwd: dir, env })
+    const proc = pty.spawn(shell, args, { name: 'xterm-256color', cols: Math.max(2, cols), rows: Math.max(1, rows), cwd: dir, env })
     const id = `pty-${++this.seq}`
-    const t: Term = { id, cwd, shell: basename(shell), proc, exited: false, ring: '', total: 0, pending: '', timer: null }
+    const t: Term = { id, cwd, shell: basename(shell).replace(/\.exe$/i, ''), proc, exited: false, ring: '', total: 0, pending: '', timer: null }
     this.terms.set(id, t)
     proc.onData((d) => {
       t.ring += d

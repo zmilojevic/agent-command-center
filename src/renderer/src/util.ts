@@ -1,5 +1,14 @@
+export const isWin = typeof window !== 'undefined' && window.desktop?.platform === 'win32'
+export const isMac = typeof window !== 'undefined' && window.desktop?.platform === 'darwin'
+
+/** 'Ctrl+Shift+G' -> '⌘⇧G' on macOS, unchanged elsewhere. */
+export function modLabel(s: string): string {
+  if (!isMac) return s
+  return s.replace(/Ctrl\+?/g, '⌘').replace(/Shift\+?/g, '⇧').replace(/Alt\+?/g, '⌥')
+}
+
 export function basename(p: string): string {
-  const parts = p.replace(/\/+$/, '').split('/')
+  const parts = p.replace(/[\\/]+$/, '').split(/[\\/]+/)
   return parts[parts.length - 1] || p
 }
 
@@ -81,12 +90,12 @@ const PATH_EXT_RE = new RegExp(`\\.(?:${PATH_EXTS.join('|')})(?::\\d+(?::\\d+)?)
 export function looksLikePath(s: string): boolean {
   const t = s.trim()
   if (!t || /[\s()=<>{},;'"`]/.test(t)) return false
-  return t.startsWith('/') || t.startsWith('~/') || t.includes('/') || PATH_EXT_RE.test(t)
+  return t.startsWith('/') || t.startsWith('~/') || t.includes('/') || (isWin && (/^[A-Za-z]:[\\/]/.test(t) || t.includes('\\'))) || PATH_EXT_RE.test(t)
 }
 
 /** A chat cwd inside `<repo>/.claude/worktrees/<name>` belongs to the project at `<repo>`. */
 export function worktreeOf(cwd: string): { root: string; name: string } | null {
-  const m = cwd.match(/^(.*)\/\.claude\/worktrees\/([^/]+)$/)
+  const m = cwd.match(/^(.*)[\\/]\.claude[\\/]worktrees[\\/]([^\\/]+)$/)
   return m && m[1] ? { root: m[1], name: m[2] } : null
 }
 

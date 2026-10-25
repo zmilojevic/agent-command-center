@@ -624,6 +624,14 @@ kbd {
 .topbar-meta .meta {
   min-width: 0;
 }
+.topbar-project {
+  padding-right: 3px;
+}
+.topbar-changes {
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+  gap: 4px;
+}
 .topbar-meta .meta-text {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -750,14 +758,14 @@ kbd {
   text-align: center;
   padding: 80px 0 30px;
 }
-.empty-mark,
-.welcome-mark {
+.empty-mark {
   color: var(--accent);
   font-size: 34px;
+}
+.empty-mark {
   margin-bottom: 8px;
 }
-.empty-chat h2,
-.welcome h1 {
+.empty-chat h2 {
   font-family: 'Georgia', 'Times New Roman', serif;
   font-weight: 500;
   margin: 0 0 6px;
@@ -1530,62 +1538,6 @@ pre.diff {
 .send.stop {
   background: var(--text);
   color: var(--bg);
-}
-
-/* ---- welcome ------------------------------------------------------------ */
-.welcome {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow-y: auto;
-}
-.welcome-inner {
-  text-align: center;
-  max-width: 520px;
-  width: 100%;
-  padding: 24px;
-}
-.welcome h1 {
-  font-size: 30px;
-}
-.recent {
-  margin-top: 36px;
-  text-align: left;
-  border-top: 1px solid var(--border);
-  padding-top: 14px;
-}
-.recent-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--muted);
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.6px;
-  margin-bottom: 6px;
-}
-.recent-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  width: 100%;
-  padding: 8px 10px;
-  border-radius: 8px;
-  text-align: left;
-}
-.recent-row:hover {
-  background: var(--surface-2);
-}
-.recent-title {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.recent-meta {
-  color: var(--muted);
-  font-size: 12px;
-  white-space: nowrap;
 }
 
 /* ---- modal -------------------------------------------------------------- */
@@ -2419,28 +2371,6 @@ pre.diff {
   min-height: 0;
   display: flex;
   flex-direction: column;
-}
-.changes-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 28px;
-  padding: 0 8px;
-  border-radius: 7px;
-  color: var(--text-2);
-  font-size: 12px;
-  white-space: nowrap;
-}
-.changes-btn:hover {
-  background: var(--surface-2);
-  color: var(--text);
-}
-.changes-btn.on {
-  background: var(--surface-2);
-  color: var(--text);
-}
-.changes-count {
-  font-variant-numeric: tabular-nums;
 }
 .cp-add {
   color: color-mix(in srgb, var(--ok) 65%, var(--muted));

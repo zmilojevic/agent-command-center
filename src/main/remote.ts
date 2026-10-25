@@ -2,6 +2,7 @@
 // `@anthropic-ai/claude-agent-sdk/bridge` export. The CLI's own `--remote-control` only works in the
 // interactive REPL, so the app acts as the host itself (like Claude Desktop / VS Code do).
 import { app } from 'electron'
+import { execFileSync } from 'node:child_process'
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
@@ -30,10 +31,25 @@ const TOKEN_EXPIRED = 'Claude login token expired – send a message in any chat
 /** Fresh OAuth access token for the bridge HTTP calls only; never logged, never written, never sent to the renderer. */
 function readAccessToken(): string {
   let o: { accessToken?: string; expiresAt?: number } | undefined
-  try {
-    o = JSON.parse(readFileSync(CREDENTIALS_FILE, 'utf8')).claudeAiOauth
-  } catch {
-    throw new Error('Not logged in to Claude (no ~/.claude/.credentials.json)')
+  if (process.platform === 'darwin') {
+    // Claude Code keeps the OAuth credentials in the login Keychain on macOS.
+    try {
+      const out = execFileSync('/usr/bin/security', ['find-generic-password', '-s', 'Claude Code-credentials', '-w'], {
+        timeout: 5000,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      })
+      o = JSON.parse(out).claudeAiOauth
+    } catch {
+      /* fall back to the file */
+    }
+  }
+  if (!o) {
+    try {
+      o = JSON.parse(readFileSync(CREDENTIALS_FILE, 'utf8')).claudeAiOauth
+    } catch {
+      throw new Error(process.platform === 'darwin' ? 'Not logged in to Claude' : 'Not logged in to Claude (no ~/.claude/.credentials.json)')
+    }
   }
   if (!o?.accessToken) throw new Error('Not logged in to Claude (no access token)')
   if (typeof o.expiresAt === 'number' && o.expiresAt < Date.now() + 30_000) throw new Error(TOKEN_EXPIRED)

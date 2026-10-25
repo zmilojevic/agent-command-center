@@ -1,11 +1,11 @@
-import { app, BrowserWindow, ipcMain, dialog, shell, nativeTheme, nativeImage, Notification } from 'electron'
+import { app, BrowserWindow, Menu, ipcMain, dialog, shell, nativeTheme, nativeImage, Notification } from 'electron'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { existsSync, mkdirSync } from 'node:fs'
 import { readdir, rmdir } from 'node:fs/promises'
 import { watch } from 'chokidar'
 import { listSessions, getSessionMessages, renameSession, deleteSession } from '@anthropic-ai/claude-agent-sdk'
-import { RunnerRegistry } from './agent'
+import { RunnerRegistry, listAllModels } from './agent'
 import { readSessionMeta } from './sessionMeta'
 import { UsageService } from './usage'
 import { gitChanges, createWorktree, removeWorktree, gitSetStaged, gitDiscardFile, gitDiscardHunk } from './git'
@@ -14,11 +14,19 @@ import { RemoteManager } from './remote'
 import { PtyManager } from './pty'
 import { CHATS_DIR } from './paths'
 import { setupTray, focusWindow } from './tray'
+import { resourceFile } from './resources'
+import { loadLoginShellEnv } from './shellEnv'
 import type { StartChatOptions, PermissionResponse, PermissionMode, UserContent, NotifyRequest, Theme, RemoteEnableInfo } from '../shared/types'
 
+// Keep the profile in <appData>/agent-command-center: the packaged productName ("Agent Command Center") must not
+// move it (on Linux this is the same path as before). An explicit --user-data-dir (test copies) wins.
+if (!app.commandLine.hasSwitch('user-data-dir')) app.setPath('userData', join(app.getPath('appData'), 'agent-command-center'))
+
 // Wayland-native when available (Hyprland), X11 fallback otherwise.
-app.commandLine.appendSwitch('ozone-platform-hint', 'auto')
-app.commandLine.appendSwitch('enable-features', 'WaylandWindowDecorations')
+if (process.platform === 'linux') {
+  app.commandLine.appendSwitch('ozone-platform-hint', 'auto')
+  app.commandLine.appendSwitch('enable-features', 'WaylandWindowDecorations')
+}
 app.commandLine.appendSwitch('disable-renderer-backgrounding')
 
 let win: BrowserWindow | null = null
@@ -52,7 +60,7 @@ function createWindow(): void {
     height: 880,
     minWidth: 820,
     minHeight: 520,
-    frame: false,
+    ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 16, y: 17 } } : { frame: false }),
     show: false,
     backgroundColor: windowBg(),
     title: process.env.CCD_WINDOW_TITLE || 'Agent Command Center',
@@ -145,6 +153,7 @@ ipcMain.handle('chat:setPermissionMode', (_e, chatId: string, mode: PermissionMo
 )
 ipcMain.handle('chat:close', (_e, chatId: string) => runners.close(chatId))
 ipcMain.handle('chat:models', (_e, chatId: string) => runners.get(chatId)?.listModels() ?? [])
+ipcMain.handle('app:models', () => listAllModels(runners, log))
 ipcMain.handle('chat:commands', (_e, chatId: string) => runners.get(chatId)?.listCommands() ?? [])
 ipcMain.handle('chat:agents', (_e, chatId: string) => runners.get(chatId)?.listAgents() ?? [])
 ipcMain.handle('chat:files', (_e, chatId: string, query: string) => runners.get(chatId)?.fileSuggestions(query) ?? [])
@@ -184,8 +193,8 @@ ipcMain.handle('usage:get', (_e, force?: boolean) => usageService!.get(!!force))
 const liveNotifications = new Set<Notification>()
 // Claude's logo from the system icon theme (claude-desktop package) if installed, else our own icon.
 const NOTIFY_ICON_CANDIDATES = [
-  '/usr/share/icons/hicolor/256x256/apps/claude-desktop.png',
-  join(app.getAppPath(), 'resources', 'icon.png')
+  ...(process.platform === 'linux' ? ['/usr/share/icons/hicolor/256x256/apps/claude-desktop.png'] : []),
+  resourceFile('icon.png')
 ]
 let notifyIcon: Electron.NativeImage | undefined | null = null
 function notificationIcon(): Electron.NativeImage | undefined {
@@ -271,7 +280,7 @@ function watchSessions(): void {
     if (timer) clearTimeout(timer)
     timer = setTimeout(() => emit('sessions:changed', null), 800)
   }
-  watch(dir, { depth: 1, ignoreInitial: true, ignored: (p) => p.includes('/subagents') })
+  watch(dir, { depth: 1, ignoreInitial: true, ignored: (p) => /[\\/]subagents/.test(p) })
     .on('add', ping)
     .on('change', ping)
     .on('unlink', ping)
@@ -291,7 +300,29 @@ if (!process.env.ELECTRON_RENDERER_URL && !app.requestSingleInstanceLock()) {
     }
   })
 
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
+    if (process.platform === 'win32') app.setAppUserModelId('com.zmilojevic.agent-command-center')
+    if (process.platform === 'darwin') {
+      await loadLoginShellEnv(log)
+      Menu.setApplicationMenu(
+        Menu.buildFromTemplate([
+          {
+            label: 'Agent Command Center',
+            submenu: [
+              { role: 'about' },
+              { type: 'separator' },
+              { role: 'hide' },
+              { role: 'hideOthers' },
+              { role: 'unhide' },
+              { type: 'separator' },
+              { label: 'Quit Agent Command Center', accelerator: 'Cmd+Q', click: quitApp },
+            ],
+          },
+          { role: 'editMenu' },
+          { label: 'Window', submenu: [{ role: 'minimize' }, { role: 'zoom' }] },
+        ]),
+      )
+    }
     // Notification daemons look up the app icon and name through the desktop entry.
     if (process.platform === 'linux') app.setDesktopName('agent-command-center.desktop')
 
@@ -306,7 +337,8 @@ if (!process.env.ELECTRON_RENDERER_URL && !app.requestSingleInstanceLock()) {
     watchSessions()
     usageService?.start()
     app.on('activate', () => {
-      if (BrowserWindow.getAllWindows().length === 0) createWindow()
+      if (process.platform === 'darwin' && win && !win.isDestroyed()) void focusWindow(win)
+      else if (BrowserWindow.getAllWindows().length === 0) createWindow()
     })
   })
 }

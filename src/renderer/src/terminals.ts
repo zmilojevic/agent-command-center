@@ -1,4 +1,5 @@
 import { Terminal, type ITheme } from '@xterm/xterm'
+import { isMac } from './util'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import '@xterm/xterm/css/xterm.css'
@@ -110,15 +111,18 @@ export function ensureTerminal(id: string, exitedCode?: number): Entry {
     if (ev.type !== 'keydown') return true
     const k = ev.key
     if (ev.ctrlKey && !ev.shiftKey && !ev.altKey && (k === '`' || ev.code === 'Backquote')) return false // app toggle (window listener)
-    if (ev.ctrlKey && ev.shiftKey && !ev.altKey && k.toLowerCase() === 'g') return false // app: changes panel
+    if ((ev.ctrlKey || ev.metaKey) && ev.shiftKey && !ev.altKey && k.toLowerCase() === 'g') return false // app: changes panel
+    if (isMac && ev.metaKey && (k === 'Tab' || k === '`' || ev.code === 'Backquote')) return false // OS-level, let it through
     if (ev.ctrlKey && k === 'Tab') return false // app: next/previous chat
-    if (ev.ctrlKey && ev.shiftKey && !ev.altKey && k.toLowerCase() === 'c') {
+    const macCopy = isMac && ev.metaKey && !ev.ctrlKey && !ev.shiftKey && !ev.altKey && k.toLowerCase() === 'c'
+    const macPaste = isMac && ev.metaKey && !ev.ctrlKey && !ev.shiftKey && !ev.altKey && k.toLowerCase() === 'v'
+    if (macCopy || (ev.ctrlKey && ev.shiftKey && !ev.altKey && k.toLowerCase() === 'c')) {
       ev.preventDefault()
       const sel = term.getSelection()
       if (sel) void navigator.clipboard.writeText(sel)
       return false
     }
-    if (ev.ctrlKey && ev.shiftKey && !ev.altKey && k.toLowerCase() === 'v') {
+    if (macPaste || (ev.ctrlKey && ev.shiftKey && !ev.altKey && k.toLowerCase() === 'v')) {
       ev.preventDefault() // stops the native paste event, which would paste a second time
       void navigator.clipboard.readText().then((t) => t && !entry.exited && term.paste(t))
       return false

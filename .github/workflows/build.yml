@@ -1,0 +1,104 @@
+name: Build
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux
+          - os: macos-latest
+            target: mac
+          - os: windows-latest
+            target: win
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: pnpm
+
+      # postinstall rebuilds node-pty for Electron (node-gyp: Python + C++ toolchain are
+      # preinstalled on all three hosted runners).
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm typecheck
+
+      # Signing material is only exported when the secret is non-empty, so forks and
+      # repos without secrets still produce unsigned builds.
+      - name: Signing environment
+        shell: bash
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          export_if_set() { [ -n "${!1}" ] && echo "$1=${!1}" >> "$GITHUB_ENV" || true; }
+          case "$TARGET" in
+            mac)
+              if [ -n "$CSC_LINK" ]; then
+                for v in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do export_if_set $v; done
+              else
+                # no certificate: ad-hoc sign (arm64 binaries must carry some signature)
+                echo "MAC_BUILDER_ARGS=-c.mac.identity=-" >> "$GITHUB_ENV"
+              fi ;;
+            win)
+              if [ -n "$WIN_CSC_LINK" ]; then
+                for v in WIN_CSC_LINK WIN_CSC_KEY_PASSWORD; do export_if_set $v; done
+              else
+                echo "CSC_IDENTITY_AUTO_DISCOVERY=false" >> "$GITHUB_ENV"
+              fi ;;
+          esac
+
+      - name: Package
+        shell: bash
+        run: |
+          if [ "${{ matrix.target }}" = mac ]; then
+            pnpm dist:mac $MAC_BUILDER_ARGS
+          else
+            pnpm dist:${{ matrix.target }}
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-command-center-${{ matrix.target }}
+          if-no-files-found: error
+          path: |
+            dist/*.AppImage
+            dist/*.deb
+            dist/*.dmg
+            dist/*.zip
+            dist/*.exe
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: artifacts/*

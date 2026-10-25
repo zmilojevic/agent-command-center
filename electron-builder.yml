@@ -1,0 +1,64 @@
+appId: com.zmilojevic.agent-command-center
+productName: Agent Command Center
+copyright: Copyright (c) Zeljko Milojevic
+directories:
+  output: dist
+  buildResources: build
+files:
+  - out/**
+  - package.json
+extraResources:
+  - from: resources
+    to: resources
+asarUnpack:
+  - node_modules/node-pty/**
+  - node_modules/@anthropic-ai/claude-agent-sdk-*/**
+# postinstall already rebuilt node-pty for Electron's ABI on this machine
+npmRebuild: false
+artifactName: ${name}-${version}-${os}-${arch}.${ext}
+
+linux:
+  target:
+    - target: AppImage
+      arch: x64
+    - target: deb
+      arch: x64
+  executableName: agent-command-center
+  category: Development
+  icon: icon.png
+  desktop:
+    entry:
+      StartupWMClass: agent-command-center
+      Comment: Desktop GUI for Claude Code sessions
+
+mac:
+  target:
+    - target: dmg
+      arch: arm64
+    - target: zip
+      arch: arm64
+  category: public.app-category.developer-tools
+  icon: icon.png
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  # Signing identity is not set here: with CSC_LINK / CSC_NAME electron-builder picks the
+  # certificate itself. Without one there is no automatic ad-hoc fallback, so the unsigned
+  # build passes `-c.mac.identity=-` (see the workflow). Notarization only runs when APPLE_*
+  # credentials are in the environment.
+
+dmg:
+  sign: false
+
+win:
+  target:
+    - target: nsis
+      arch: x64
+  icon: build/icon.ico
+  # Signed only when WIN_CSC_LINK / CSC_LINK is set in the environment.
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  perMachine: false

@@ -1,10 +1,10 @@
 import type React from 'react'
 import { Fragment, useMemo, useRef, useState, useEffect } from 'react'
-import { Plus, Search, Clock, FolderGit2, FolderPlus, ChevronRight, ChevronDown, Pencil, Trash2, GitFork, FolderOpen, Pin, PinOff, MessageSquarePlus, ChevronsDownUp, ChevronsUpDown, XCircle, FolderX, Flame, Snowflake, Check, MessageCircle, GitBranchPlus, Code, SquareTerminal, Smartphone } from 'lucide-react'
+import { Plus, Search, Clock, FolderGit2, FolderPlus, ChevronRight, ChevronDown, Pencil, Trash2, GitFork, FolderOpen, Pin, PinOff, MessageSquarePlus, ChevronsDownUp, ChevronsUpDown, XCircle, FolderX, Flame, Snowflake, Check, MessageCircle, GitBranchPlus, Code, SquareTerminal, Smartphone, SlidersHorizontal } from 'lucide-react'
 import { openFolderInEditor, openTerminalAt } from '../openIn'
 import { useStore, KEEP_WARM_MAX_IDLE_MS, isGeneral } from '../store'
-import type { SessionSummary } from '@shared/types'
-import { projectName, projectRoot, worktreeOf, relativeTime, shortPath, modelLabel, defaultContextWindow, fmtTokens, fmtElapsed } from '../util'
+import { EFFORT_LEVELS, type SessionSummary, type ModelChoice } from '@shared/types'
+import { projectName, projectRoot, worktreeOf, relativeTime, shortPath, modelLabel, defaultContextWindow, fmtTokens, fmtElapsed, isMac } from '../util'
 import type { Subagent } from '../reduce'
 import { useNow } from '../hooks'
 import { subagentLine } from './ToolCard'
@@ -65,13 +65,13 @@ export default function Sidebar() {
   const setProjectOrder = useStore((s) => s.setProjectOrder)
   const projectNames = useStore((s) => s.projectNames)
   const renameProject = useStore((s) => s.renameProject)
+  const [defaultsFor, setDefaultsFor] = useState<{ cwd: string; name: string } | null>(null)
   const [renamingProject, setRenamingProject] = useState<{ cwd: string; name: string } | null>(null)
   const [dragging, setDragging] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState<string | null>(null)
   const newChat = useStore((s) => s.newChat)
   const newGeneralChat = useStore((s) => s.newGeneralChat)
   const generalDir = useStore((s) => s.generalDir)
-  const lastModel = useStore((s) => s.lastModel)
   const lastMode = useStore((s) => s.lastMode)
   const [groupMenu, setGroupMenu] = useState<{ x: number; y: number; g: Group } | null>(null)
   const meta = useStore((s) => s.meta)
@@ -295,7 +295,7 @@ export default function Sidebar() {
     if (dir) pinProject(dir)
   }
   const quickChat = (cwd: string): void => {
-    void newChat({ cwd, model: lastModel, permissionMode: lastMode })
+    void newChat({ cwd, permissionMode: lastMode })
   }
 
   useEffect(() => {
@@ -507,7 +507,7 @@ export default function Sidebar() {
     }
     const onDown = (e: KeyboardEvent): void => {
       const root = scrollRef.current
-      if (e.key !== 'Tab' || !(e.ctrlKey || e.metaKey) || e.altKey || !root) return
+      if (e.key !== 'Tab' || !(e.ctrlKey || (e.metaKey && !isMac)) || e.altKey || !root) return
       e.preventDefault()
       e.stopPropagation()
       if (document.querySelector('.modal-backdrop, .dd-menu, .context-menu')) return
@@ -865,6 +865,11 @@ export default function Sidebar() {
           <button onClick={() => { setRenamingProject({ cwd: groupMenu.g.cwd, name: groupMenu.g.name }); setGroupMenu(null) }}>
             <Pencil size={14} /> Rename project…
           </button>
+          {!groupMenu.g.general && (
+            <button onClick={() => { setDefaultsFor({ cwd: groupMenu.g.cwd, name: groupMenu.g.name }); setGroupMenu(null) }}>
+              <SlidersHorizontal size={14} /> Default model &amp; effort…
+            </button>
+          )}
           <div className="sep" />
           {groupMenu.g.pinned ? (
             <button onClick={() => { unpinProject(groupMenu.g.cwd); setGroupMenu(null) }}>
@@ -1022,7 +1027,88 @@ export default function Sidebar() {
           </div>
         </div>
       )}
+      {defaultsFor && <ProjectDefaultsDialog cwd={defaultsFor.cwd} name={defaultsFor.name} onClose={() => setDefaultsFor(null)} />}
     </aside>
+  )
+}
+
+function ProjectDefaultsDialog({ cwd, name, onClose }: { cwd: string; name: string; onClose: () => void }) {
+  const stored = useStore((s) => s.projectDefaults[cwd])
+  const lastModel = useStore((s) => s.lastModel)
+  const setProjectDefaults = useStore((s) => s.setProjectDefaults)
+  const [model, setModel] = useState(stored?.model ?? '')
+  const [effort, setEffort] = useState(stored?.effort ?? '')
+  const [models, setModels] = useState<ModelChoice[]>([])
+
+  useEffect(() => {
+    let alive = true
+    // Open chats already know the list; use it unless main answers with one (it may be missing after a renderer-only reload).
+    const known = Object.values(useStore.getState().chats).find((c) => c.models.length)?.models
+    if (known) setModels(known)
+    void window.desktop
+      .listAllModels()
+      .then((m) => alive && m.length && setModels(m))
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  const labelOf = (v: string): string => models.find((m) => m.value === v)?.displayName ?? (v === 'default' ? 'Default' : modelLabel(v))
+  const modelOptions: { value: string; label: string; description?: string }[] = [{ value: '', label: 'Last used', description: labelOf(lastModel) }]
+  if (!models.some((m) => m.value === 'default')) modelOptions.push({ value: 'default', label: 'Default' })
+  for (const m of models) modelOptions.push({ value: m.value, label: m.displayName, description: m.description })
+  if (model && !modelOptions.some((o) => o.value === model)) modelOptions.push({ value: model, label: modelLabel(model) })
+
+  const info = models.find((m) => m.value.toLowerCase() === model.toLowerCase())
+  const levels = info?.efforts?.length ? EFFORT_LEVELS.filter((e) => info.efforts!.includes(e.value)) : EFFORT_LEVELS
+  const showEffort = !info || info.supportsEffort !== false
+  const effortOptions = [
+    { value: '', label: 'Last used' },
+    { value: 'default', label: 'Default', description: "The model's default effort" },
+    ...levels.map((e) => ({ value: e.value as string, label: e.label })),
+  ]
+  if (effort && !effortOptions.some((o) => o.value === effort)) effortOptions.push({ value: effort, label: effort })
+
+  const save = (): void => {
+    setProjectDefaults(cwd, { model: model || undefined, effort: showEffort ? effort || undefined : undefined })
+    onClose()
+  }
+
+  return (
+    <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div
+        className="modal rename-modal"
+        onKeyDown={(e) => {
+          // Enter on a Dropdown opens/picks in it (it preventDefaults while open); only elsewhere does it save.
+          if (e.key === 'Enter' && !e.defaultPrevented && !(e.target as Element).closest('.dd')) save()
+          else if (e.key === 'Escape') onClose()
+        }}
+      >
+        <div className="modal-head">
+          <h3>Default model &amp; effort</h3>
+        </div>
+        <p className="modal-text muted">{name}</p>
+        <div className="field">
+          <span>Model</span>
+          <Dropdown className="dd-field" value={model} options={modelOptions} onChange={setModel} />
+        </div>
+        {showEffort && (
+          <div className="field">
+            <span>Effort</span>
+            <Dropdown className="dd-field" value={effort} options={effortOptions} onChange={setEffort} />
+          </div>
+        )}
+        <div className="modal-actions">
+          <button className="btn" onClick={onClose}>
+            Cancel
+          </button>
+          <button className="btn primary" onClick={save}>
+            Save
+          </button>
+        </div>
+      </div>
+    </div>
   )
 }
 

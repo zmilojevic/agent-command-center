@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { modLabel } from '../util'
 import { RefreshCw, X, ChevronRight, Check, Minus, Undo2, ExternalLink } from 'lucide-react'
 import { useStore } from '../store'
 import type { ChangedFile } from '@shared/types'
@@ -123,7 +124,7 @@ export default function ChangesPanel({ chatId }: { chatId: string }) {
         <button className="icon-btn tiny" title="Refresh" onClick={() => void refreshChanges(cwd)}>
           <RefreshCw size={13} className={entry?.loading ? 'cp-spin' : ''} />
         </button>
-        <button className="icon-btn tiny" title="Close (Ctrl+Shift+G)" onClick={toggleChanges}>
+        <button className="icon-btn tiny" title={`Close (${modLabel('Ctrl+Shift+G')})`} onClick={toggleChanges}>
           <X size={14} />
         </button>
       </div>

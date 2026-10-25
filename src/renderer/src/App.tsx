@@ -5,13 +5,13 @@ import Sidebar from './components/Sidebar'
 import TopBar from './components/TopBar'
 import ChatView from './components/ChatView'
 import Composer from './components/Composer'
-import Welcome from './components/Welcome'
 import NewSessionDialog from './components/NewSessionDialog'
 import ErrorBoundary from './components/ErrorBoundary'
 import FindBar from './components/FindBar'
 import ChangesPanel from './components/ChangesPanel'
 import TerminalPanel from './components/TerminalPanel'
 import RightDock from './components/RightDock'
+import ToolStrip from './components/ToolStrip'
 import { initTerminals, focusTerminal, terminalHasFocus } from './terminals'
 
 /** Focus the composer textarea once it is mounted (retries a few frames after a chat opens). */
@@ -173,8 +173,8 @@ export default function App() {
         <TopBar />
         <div className="main-row">
           <div className={`chat-pane ${freshGeneral ? 'fresh' : ''}`}>
-            <ErrorBoundary name="Chat" key={activeChatId ?? 'welcome'}>
-              {activeChatId ? (
+            <ErrorBoundary name="Chat" key={activeChatId ?? 'none'}>
+              {activeChatId && (
                 <>
                   <div className="chat-area">
                     {findOpen && <FindBar chatId={activeChatId} />}
@@ -182,8 +182,6 @@ export default function App() {
                   </div>
                   <Composer chatId={activeChatId} />
                 </>
-              ) : (
-                <Welcome />
               )}
             </ErrorBoundary>
           </div>
@@ -200,6 +198,11 @@ export default function App() {
                 </ErrorBoundary>
               )}
             </RightDock>
+          )}
+          {activeChatId && !generalActive && (
+            <ErrorBoundary name="ToolStrip" key={`toolstrip-${activeChatId}`}>
+              <ToolStrip />
+            </ErrorBoundary>
           )}
         </div>
       </main>

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { FolderOpen, X } from 'lucide-react'
 import { useStore } from '../store'
 import { PERMISSION_MODES, type PermissionMode } from '@shared/types'
-import { projectName, shortPath } from '../util'
+import { modelLabel, projectName, projectRoot, shortPath } from '../util'
 import Dropdown from './Dropdown'
 
 const MODELS = [
@@ -28,6 +28,13 @@ export default function NewSessionDialog() {
   const [cwd, setCwd] = useState(presetCwd ?? lastCwd)
   const [model, setModel] = useState(lastModel)
   const [mode, setMode] = useState<PermissionMode>(lastMode)
+
+  // Follow the picked folder's project default (else the last used model) whenever the folder changes.
+  const defaultModel = useStore((s) => s.projectDefaults[projectRoot(cwd)]?.model)
+  useEffect(() => {
+    setModel(defaultModel ?? lastModel)
+  }, [defaultModel, lastModel])
+  const modelOptions = MODELS.some((m) => m.value === model) ? MODELS : [...MODELS, { value: model, label: modelLabel(model) }]
 
   useEffect(() => {
     void window.desktop.homeDir().then((h) => {
@@ -85,7 +92,7 @@ export default function NewSessionDialog() {
         <div className="field-grid">
           <div className="field">
             <span>Model</span>
-            <Dropdown className="dd-field" value={model} options={MODELS} onChange={setModel} />
+            <Dropdown className="dd-field" value={model} options={modelOptions} onChange={setModel} />
           </div>
           <div className="field">
             <span>Permissions</span>

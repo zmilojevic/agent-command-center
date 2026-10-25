@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { modLabel } from '../util'
 import { ClipboardList } from 'lucide-react'
 import type { PermissionMode, PermissionRequest } from '@shared/types'
 import { useStore } from '../store'
@@ -27,7 +28,7 @@ export default function PlanCard({ request }: { request: PermissionRequest }) {
     const h = (e: KeyboardEvent): void => {
       const t = e.target as HTMLElement | null
       if (t && (t.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])') || t.isContentEditable)) return
-      if (e.key === 'Enter' && e.ctrlKey && !e.shiftKey && !e.altKey) {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
         e.preventDefault()
         approve('acceptEdits')
       }
@@ -56,7 +57,7 @@ export default function PlanCard({ request }: { request: PermissionRequest }) {
         />
       )}
       <div className="perm-actions">
-        <button className="btn primary" onClick={() => approve('acceptEdits')} title="Ctrl+Enter">
+        <button className="btn primary" onClick={() => approve('acceptEdits')} title={modLabel('Ctrl+Enter')}>
           Approve · accept edits
         </button>
         <button className="btn" onClick={() => approve('bypassPermissions')}>

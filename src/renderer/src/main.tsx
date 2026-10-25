@@ -10,6 +10,10 @@ import './styles/mcp-worktree.css'
 import './styles/changes-open.css'
 import './styles/remote.css'
 import './styles/terminal.css'
+import './styles/toolstrip.css'
+import './styles/platform.css'
+
+document.documentElement.dataset.platform = window.desktop.platform
 
 // Apply the saved theme before the first paint so the window never flashes the wrong palette.
 initTheme()

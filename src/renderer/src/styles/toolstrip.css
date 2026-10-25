@@ -1,0 +1,38 @@
+.tool-strip {
+  width: 44px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 0;
+  background: var(--bg-2);
+  border-left: 1px solid var(--border);
+}
+.tool-btn {
+  width: 32px;
+  min-height: 32px;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 6px 0;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.tool-btn:hover {
+  background: var(--surface-2);
+  color: var(--text-2);
+}
+.tool-btn.on {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.tool-btn:focus-visible {
+  outline: 1px solid var(--accent-muted);
+  outline-offset: -1px;
+}

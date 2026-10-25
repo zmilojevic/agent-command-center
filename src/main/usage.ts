@@ -1,5 +1,6 @@
 import { query } from '@anthropic-ai/claude-agent-sdk'
 import { homedir } from 'node:os'
+import { claudeExecutable } from './claudeBin'
 import type { PlanUsage, UsageRow } from '../shared/types'
 import type { RunnerRegistry } from './agent'
 
@@ -149,7 +150,8 @@ export class UsageService {
     async function* idle(): AsyncGenerator<never> {
       await gate
     }
-    const q = query({ prompt: idle(), options: { cwd: homedir(), persistSession: false, stderr: (d) => log(d) } })
+    const exe = claudeExecutable()
+    const q = query({ prompt: idle(), options: { cwd: homedir(), persistSession: false, stderr: (d) => log(d), ...(exe ? { pathToClaudeCodeExecutable: exe } : {}) } })
     try {
       return await q.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({ skipBehaviors: true })
     } finally {

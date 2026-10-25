@@ -1,0 +1,7 @@
+/* macOS: native traffic lights sit at the top-left (titleBarStyle hiddenInset). */
+html[data-platform='darwin'] .win-controls {
+  display: none;
+}
+html[data-platform='darwin'] .sidebar-head {
+  padding-left: 84px;
+}

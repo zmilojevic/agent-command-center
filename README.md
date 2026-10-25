@@ -68,6 +68,28 @@ A matching desktop entry (`~/.local/share/applications/agent-command-center.desk
 `Exec=agent-command-center`, `Icon=<repo>/resources/icon.svg` and `StartupWMClass=agent-command-center`.
 The launcher runs whatever is in `out/`, so run `pnpm build` again after pulling changes.
 
+## Install a packaged build
+
+Packaged builds for Linux (AppImage, deb), macOS (Apple silicon, dmg/zip) and Windows (NSIS installer) come
+from the `Build` GitHub Actions workflow: download them from the run's artifacts, or from the draft release
+that a `v*` tag push creates. They are unsigned unless signing secrets are configured (below). You still need
+the Claude Code CLI login (see Requirements).
+
+- Linux: `chmod +x agent-command-center-*.AppImage && ./agent-command-center-*.AppImage`, or `sudo apt install ./agent-command-center-*.deb`.
+- macOS: open the dmg and drag the app to Applications. An unsigned build is blocked by Gatekeeper: run
+  `xattr -cr "/Applications/Agent Command Center.app"` once, or right-click the app and choose Open.
+- Windows: run the installer. SmartScreen may warn for an unsigned build: "More info" then "Run anyway".
+  Install Git for Windows as well; Claude Code's Bash tool uses Git Bash.
+
+Build locally on the matching OS (each platform needs its own native binaries): `pnpm dist:linux`,
+`pnpm dist:mac` or `pnpm dist:win`; output goes to `dist/`. Icons are generated from `resources/icon.svg` by
+`scripts/make-icons.sh` (needs `rsvg-convert` and ImageMagick); the outputs are committed.
+`pnpm dist:mac -c.mac.identity=-` ad-hoc signs a local build.
+
+Signing in CI: add repository secrets. macOS: `CSC_LINK` (base64 .p12 of a Developer ID Application certificate),
+`CSC_KEY_PASSWORD`, plus `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID` for notarization.
+Windows: `WIN_CSC_LINK`, `WIN_CSC_KEY_PASSWORD`. Without them the workflow builds unsigned (macOS ad-hoc signed).
+
 ## Keyboard shortcuts
 
 | Keys | Action |
@@ -117,7 +139,7 @@ The renderer store is available in DevTools as `window.__ccd.getState()`.
 
 ## Known limitations
 
-- Linux only so far; no packaged build or auto-update (`pnpm package` produces an unpacked directory only).
+- No auto-update; packaged builds are unsigned by default, and the macOS and Windows ones have not been tested by the author.
 - Subagents are tracked only for chats opened in the app; a resumed transcript does not list earlier ones.
 - There are no file `@` mentions.
 - Output of local slash commands is not part of the stored transcript, so it is gone after reopening a session.

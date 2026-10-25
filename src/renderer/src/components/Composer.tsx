@@ -5,7 +5,7 @@ import ImageThumb from './ImageThumb'
 import TasksStrip from './TasksStrip'
 import { useStore, isGeneral } from '../store'
 import { EFFORT_LEVELS, PERMISSION_MODES, type PermissionMode, type SlashCommandInfo, type AgentChoice } from '@shared/types'
-import { modelLabel, fmtTokens } from '../util'
+import { modelLabel, fmtTokens, modLabel } from '../util'
 import { dataUrl, readImages } from '../images'
 
 const FALLBACK_MODELS: { value: string; displayName: string; description?: string }[] = [
@@ -98,13 +98,13 @@ type MentionItem = { kind: 'agent'; a: AgentChoice } | { kind: 'file'; path: str
 
 /** A file path as shown in the picker, the basename emphasised. */
 function FilePath({ path }: { path: string }) {
-  const trimmed = path.replace(/\/$/, '')
-  const cut = trimmed.lastIndexOf('/') + 1
+  const trimmed = path.replace(/[\\/]$/, '')
+  const cut = Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\')) + 1
   return (
     <span className="file-path" title={path}>
       {trimmed.slice(0, cut)}
       <span className="file-base">{trimmed.slice(cut)}</span>
-      {path.endsWith('/') ? '/' : ''}
+      {/[\\/]$/.test(path) ? path.slice(-1) : ''}
     </span>
   )
 }
@@ -340,7 +340,7 @@ export default function Composer({ chatId }: { chatId: string }) {
   const pickFile = (path: string): void => {
     if (!mentionMatch) return
     const start = caret - mentionMatch[2].length - 1
-    const dir = path.endsWith('/')
+    const dir = /[\\/]$/.test(path)
     const spaced = /\s/.test(path)
     const insert = dir ? (spaced ? `@"${path}` : `@${path}`) : spaced ? `@"${path}" ` : `@${path} `
     setDraft(chatId, draft.slice(0, start) + insert + draft.slice(caret))
@@ -440,7 +440,7 @@ export default function Composer({ chatId }: { chatId: string }) {
                   </span>
                 ) : (
                   <span className="file-row">
-                    {it.path.endsWith('/') ? <Folder size={14} /> : <File size={14} />}
+                    {/[\\/]$/.test(it.path) ? <Folder size={14} /> : <File size={14} />}
                     <FilePath path={it.path} />
                   </span>
                 )}
@@ -666,7 +666,7 @@ export default function Composer({ chatId }: { chatId: string }) {
             <ImagePlus size={16} />
           </button>
           {!general && (
-            <button className="icon-btn" title="Clear the conversation (/clear, Alt+Delete)" onClick={() => void clearChat(chatId)}>
+            <button className="icon-btn" title={`Clear the conversation (/clear, ${modLabel('Alt+Delete')})`} onClick={() => void clearChat(chatId)}>
               <Eraser size={16} />
             </button>
           )}

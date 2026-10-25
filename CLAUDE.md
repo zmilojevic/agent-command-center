@@ -31,6 +31,13 @@ the same day. It replaced the idea of tweaking the GTK `claude-session-manager` 
   Electron's ABI: `postinstall` / `pnpm rebuild:native` run `electron-rebuild -f -w node-pty` (needs a C++ toolchain); electron-vite keeps it
   external (`externalizeDepsPlugin`). Smoke test: `ELECTRON_RUN_AS_NODE=1 node_modules/.bin/electron -e "const p=require('node-pty');
   const t=p.spawn('/bin/sh',['-c','echo pty-ok'],{});t.onData(d=>process.stdout.write(d));t.onExit(()=>process.exit(0))"`.
+- Cross-platform packaging (added 2026-10-25): `electron-builder.yml` (productName "Agent Command Center" only there, never in
+  package.json; `extraResources` = `resources/` → `<resourcesPath>/resources`; `asarUnpack` node-pty + `@anthropic-ai/claude-agent-sdk-*`;
+  `npmRebuild: false`), `pnpm dist:linux|mac|win` (must run on that OS: node-pty and the SDK's per-platform optional binary).
+  CI `.github/workflows/build.yml` (manual dispatch or `v*` tag → artifacts + draft release); unsigned unless repo secrets
+  `CSC_LINK`/`CSC_KEY_PASSWORD`/`APPLE_*` (mac, notarized) or `WIN_CSC_LINK`/`WIN_CSC_KEY_PASSWORD` exist; unsigned mac = ad-hoc
+  (`-c.mac.identity=-`). Icons: `scripts/make-icons.sh` → `build/icon.png` (1024, mac padding), `build/icon.ico`,
+  `resources/trayTemplate{,@2x}.png` (mac menu bar). Local check: `pnpm exec electron-builder --linux dir` → `dist/linux-unpacked`.
 - Never `git commit` or push unless the user asks. Remote `origin` = `git@github.com:zmilojevic/agent-command-center.git`
   (public), branch `main`.
 
@@ -41,6 +48,17 @@ the same day. It replaced the idea of tweaking the GTK `claude-session-manager` 
   chokidar watcher on `~/.claude/projects` (file and dir add/change/unlink → `sessions:changed`),
   native notifications (`app:notify` → click sends `notification:click`) (icon: `/usr/share/icons/hicolor/256x256/apps/claude-desktop.png` if installed, else `resources/icon.png` rendered from `icon.svg`; without an icon the daemon shows a bell), `window:action`
   (minimize/maximize/close/reload/devtools).
+- Platforms: Linux is primary and its behaviour must not change; macOS/Windows support is code-complete but untested by the author.
+  Main: `userData` pinned to `<appData>/agent-command-center` (unless `--user-data-dir`); `resources.ts` `resourceFile()` (packaged →
+  `process.resourcesPath`); `claudeBin.ts` `claudeExecutable()` → `pathToClaudeCodeExecutable` for every `query()` when packaged (the SDK's
+  resolved binary is inside app.asar, the spawnable copy in `app.asar.unpacked`); `shellEnv.ts` imports the login shell env on macOS
+  (Finder launches get launchd's PATH; `CCD_SKIP_SHELL_ENV=1` skips); mac = `hiddenInset` title bar + traffic lights, minimal app menu
+  (no Cmd+W/R/N/F accelerators – the renderer owns them), Dock `activate` re-shows the hidden window; Windows = AppUserModelId,
+  pwsh/powershell terminal; `CHATS_DIR` = `<appData>/agent-command-center/chats` off Linux; Remote Control reads the token from the
+  macOS Keychain (`security find-generic-password -s "Claude Code-credentials" -w`) before the file; `launch.ts` has per-platform
+  editor/terminal defs (mac `.app` bundles via `open -a`, Windows PATHEXT and `.cmd` via `cmd.exe /d /s /c`); git paths go through
+  `resolve()` (git prints `C:/…`). Renderer: `window.desktop.platform` → `<html data-platform>`, `styles/platform.css`, `isMac`/`isWin`
+  and `modLabel()` (⌘ labels) in `util.ts`; path helpers accept `\` and drive letters.
 - `src/main/agent.ts` – `ChatRunner`: one SDK `query()` per open chat in **streaming-input mode** (prompt is a
   `PushQueue` async iterable, so the CLI process lives across turns). Options: cwd, permissionMode
   (+ `allowDangerouslySkipPermissions` when bypass), `includePartialMessages`, `systemPrompt` preset
@@ -99,7 +117,7 @@ the same day. It replaced the idea of tweaking the GTK `claude-session-manager` 
   buffer per terminal backs `pty:replay`, so after a renderer reload the xterm is re-filled (chunks with `end <=` the replay's `end` are dropped; live chunks arriving meanwhile are queued until the replay is parsed, and xterm's answers to queries inside the replayed output - CPR, DECRQM, DA - are muted via `Entry.muted` until the `term.write` callback so they never reach the shell as input).
   An exited shell stays listed until `pty:kill`. All killed on `before-quit` / `will-quit`; shells survive window hide and reloads.
 - Right column: `RightDock` (App.tsx) holds `ChangesPanel` and `TerminalPanel`; it owns the draggable left edge (`changesWidth` pref, capped 60 %,
-  double-click = 520). Both open = stacked in `.dock-pane` wrappers split by a horizontal `.dock-split` handle (6-7 px hit area over the hairline, row-resize, accent-muted line on hover; drag sets pref `dockSplit` = top fraction, default 0.5, each pane keeps >= 120 px, double-click = 0.5); the width handle works with either panel alone. Terminals refit on every dock resize (ResizeObserver, per animation frame). Neither shows for general chats. Terminal side:
+  double-click = 520). Both open = stacked in `.dock-pane` wrappers split by a horizontal `.dock-split` handle (6-7 px hit area over the hairline, row-resize, accent-muted line on hover; drag sets pref `dockSplit` = top fraction, default 0.5, each pane keeps >= 120 px, double-click = 0.5); the width handle works with either panel alone. Terminals refit on every dock resize (ResizeObserver, per animation frame). Neither shows for general chats. `ToolStrip` = IntelliJ-style 44 px icon column at the far right of `.main-row` (project chats only) with Changes and Terminal toggles; the `+A −D` totals sit in the TopBar left of the branch (click = toggle the changes panel); styles in `styles/toolstrip.css`. Terminal side:
   `terminals.ts` keeps one xterm `Terminal` per pty id in a module registry (never React state; `mountTerminal` moves `term.element` into the
   panel, FitAddon on a 50 ms debounced ResizeObserver, theme resolved from CSS vars and re-applied on `data-theme` changes, web links open via
   `window.open` → `shell.openExternal`); store `terminals[cwd] = {tabs:{id,shell,n}[], active, counter}` (not persisted), pref `terminalOpen`,
@@ -126,7 +144,7 @@ the same day. It replaced the idea of tweaking the GTK `claude-session-manager` 
 - `src/renderer/src/store.ts` – zustand + immer. Sessions list, `meta` per session, open chats keyed by
   chatId (sessionId inside), `tabs` (internal order only, no UI strip), pending permissions, drafts,
   attachments, queue, subagents, prefs in localStorage (`lastModel`, `pinnedProjects`, `projectOrder`, `projectNames`,
-  `collapsedProjects`, `keepWarm` (session ids), `warmedAt` (session id → start of last keep-alive request), `hiddenSessions`, `sessionSortTime`, `openTabs`, `recentHours`, `sidebarWidth`, notifications, `theme`). `lastMode` is always
+  `collapsedProjects`, `keepWarm` (session ids), `warmedAt` (session id → start of last keep-alive request), `projectDefaults`, `hiddenSessions`, `sessionSortTime`, `openTabs`, `recentHours`, `sidebarWidth`, notifications, `theme`). `lastMode` is always
   `bypassPermissions` on start (user wants every session to run with permissions skipped; the picker can
   still change one session). `restoreTabs()` reopens saved sessions on startup. `clearChat` = `/clear`:
   closes the runner and starts a fresh session (new
@@ -138,7 +156,7 @@ the same day. It replaced the idea of tweaking the GTK `claude-session-manager` 
   `SettingsPopover` (theme Dropdown + notifications switch), `McpPopover` (plug button, project chats only: `mcpServerStatus()` rows with status dot, scope chip, expandable tool list, enable switch via `toggleMcpServer`, reconnect via `reconnectMcpServer`; IPC `chat:mcpStatus/mcpToggle/mcpReconnect`, trimmed `McpServerInfo` without config/headers; refreshes on open, after actions and on chat status changes), window controls; exports `dotState`), `ChatView`, `FindBar`, `MessageItem`,
   `ToolCard` (running Bash gets a "Run in background" button), `TasksStrip` (pills above the composer for background shells/monitors/workflows, click = output popover with Stop / Copy), `DiffView`, `ChangesPanel` + `UnifiedDiff` (right-hand git changes panel with line comments), `PermissionCard`, `QuestionCard`, `Markdown` (react-markdown + gfm +
   rehype-highlight), `Composer` (slash picker, attachments, queue, model/effort/mode Dropdowns, eraser = `/clear`),
-  `NewSessionDialog`, `Welcome`, `Dropdown` (custom; **never use native `<select>`**), `ErrorBoundary`,
+  `NewSessionDialog`, `Dropdown` (custom; **never use native `<select>`**), `ErrorBoundary`,
   `ImageThumb`.
 - `src/renderer/src/theme.ts` – `initTheme()` (called in `main.tsx` before render) resolves the `theme` pref
   (`system` | `light` | `dark`) and stamps `<html data-theme="light|dark">`; all palette CSS keys off that attribute
@@ -191,7 +209,7 @@ the same day. It replaced the idea of tweaking the GTK `claude-session-manager` 
   tool headers `--hl-path` (dusty blue), Glob/Grep patterns `--hl-string`, Bash command `--hl-code`; bold/headings `--text`.
 - Sidebar (always shown: no hide button or shortcut, by user request; 390 px default; drag its right edge to resize 320–640 px, `sidebarWidth` pref, double-click = 390): header = time-window Dropdown (default last 14 h; search ignores the window) +
   collapse/expand-all button. No logo, no "New chat" button at the top, no chat counts (except a muted "(N)" after a collapsed project's name = its listed chats), no "Open"
-  section, no tab strip anywhere. Projects: order is frozen (every project's slot is saved in `projectOrder` the first time it shows up, new ones go on top once; activity never reorders), drag to reorder (saved; pinned projects always come first in their own dragged order, drags only reorder within the pinned or the unpinned section, a new pin goes to the bottom of the pinned section, unpinning puts the project at the top of the rest), "Rename project…" via context menu (display name only: `projectNames` pref, cwd → name, empty or the folder name = reset; the folder on disk is never renamed, identity stays the cwd; shown in sidebar, top bar, Welcome, new-session dialog, matched by search; dropped on Remove project), pin/unpin via context menu (pinned
+  section, no tab strip anywhere. Projects: order is frozen (every project's slot is saved in `projectOrder` the first time it shows up, new ones go on top once; activity never reorders), drag to reorder (saved; pinned projects always come first in their own dragged order, drags only reorder within the pinned or the unpinned section, a new pin goes to the bottom of the pinned section, unpinning puts the project at the top of the rest), "Rename project…" via context menu (display name only: `projectNames` pref, cwd → name, empty or the folder name = reset; the folder on disk is never renamed, identity stays the cwd; shown in sidebar, top bar, new-session dialog, matched by search; dropped on Remove project), project menu "Default model & effort…" (dialog with model/effort Dropdowns, "Last used" = follow `lastModel`/`lastEffort`; stored in `projectDefaults` by project root; applies to new chats, resumed/forked chats and worktree chats of that project, not to the composer pickers, which still set lastModel/lastEffort; dropped on Remove project; model list via `app:models` = any live runner or a temporary idle query, cached 10 min), pin/unpin via context menu (pinned
   projects stay listed without recent chats; an empty expanded project shows the same centered muted "New chat" button, which starts a chat in that project and focuses the composer; it auto-collapses after 30 s, not while searching and never the Chats section), new-chat icon always visible on the header, collapsed headers
   show a busy/unread dot, faint gradient hairlines between projects (stronger) and chats (fainter),
   "Add project" button in the footer. Chat rows are indented 10 px, title 15 px, two lines: title + time
@@ -201,7 +219,7 @@ the same day. It replaced the idea of tweaking the GTK `claude-session-manager` 
   working, green = finished and not yet seen (seen = active chat + focused window), nothing when idle, with an
   invisible spacer so titles don't jump. Chats sorted by creation time (newest first); a `/clear` clears the row in
   place: new session id under the hood, old transcript hidden from the sidebar but kept on disk, row keeps its slot via
-  `sessionSortTime`. An empty chat (no messages, draft, attachments or transcript on disk — new or just cleared) is closed as soon as another chat (or Welcome) becomes active, so its placeholder row disappears. Collapsed state, open chats and active chat are remembered.
+  `sessionSortTime`. An empty chat (no messages, draft, attachments or transcript on disk — new or just cleared) is closed as soon as another chat (or none) becomes active, so its placeholder row disappears. Collapsed state, open chats and active chat are remembered.
   Deleting a transcript asks no confirmation. "Remove project…" (project context menu) confirms with a dialog,
   then closes its chats, deletes all its transcripts (`sessions:deleteProject`; the `~/.claude/projects/<slug>` dir
   only if left empty, so `memory/` survives) and drops it from pins and `projectOrder`; a pinned project with no
@@ -214,10 +232,10 @@ the same day. It replaced the idea of tweaking the GTK `claude-session-manager` 
 - Chats section (sidebar): after all projects, always shown (when empty it shows a centered half-width, muted (transparent, grey text) "New chat" button; hidden only when a search matches nothing in it),
   header with a MessageCircle icon, not draggable/pinnable/in `projectOrder`, no path tooltip, same time window/search/sort/dots/keyboard
   navigation; rows are compact (title + time, no chips); its menu only offers New chat. Footer: full-width "New chat" (`Ctrl N`, focuses the
-  composer) above "Add project". Welcome's primary button is "New chat" (general), with a plain "New project session…" button opening the dialog.
+  composer) above "Add project". With no active chat the chat pane is empty (no welcome screen).
 - Composer: Enter sends, Shift+Enter newline, Esc while working stops the turn (same as the Stop button; an open picker closes first), Up/Down in an empty composer recall earlier prompts of that chat, `/` opens the command picker, eraser button (also Alt+Delete) = `/clear`,
   messages typed while busy are queued. Sending while the prompt cache is cold (same `max(lastAt, warmedAt) + TTL` test as the snowflake; not for `/` commands or queued messages) first asks in a `ColdCacheConfirm` modal ("expired N ago", ~context tokens; Send anyway = Enter, Cancel = Esc keeps the draft). `@` opens the agent picker (from `supportedAgents()`, `chat:agents`), inserts `@agent-<name>` which the CLI routes to that subagent; mentions render as a muted pill. The same `@` token also lists files (project chats only; regex accepts path characters and the `@"quoted` form): agents first, then up to 12 files from `chat:files` (debounced 80 ms, stale answers dropped by sequence number, one retry after 600 ms on an empty answer, index warmed once per runner generation). Picking a file inserts `@path ` (quoted if it has whitespace); a folder inserts `@dir/` and keeps the picker open. `@path` tokens in sent user messages render as the same pill (`Markdown files` prop). Shift+Tab in the composer (project chats, no picker open) toggles plan mode, remembering the previous mode (default bypass). `ExitPlanMode` permission requests render as `PlanCard` (plan Markdown, approve as accept edits / bypass / ask before edits = allow + `mode`, Ctrl+Enter = accept edits, "Keep planning" = deny with feedback); in the transcript `ExitPlanMode` is a collapsed "Plan" card and `EnterPlanMode` a muted one-liner. New CSS for these lives in `src/renderer/src/styles/mentions-plan.css`.
-- Changes panel (Ctrl+Shift+G or the `+A −D` button left of the context meter): uncommitted changes of the active
+- Changes panel (Ctrl+Shift+G or the Changes button in the right tool strip): uncommitted changes of the active
   chat's repo, refreshed on chat activation, after every `result`, on open and via its refresh button. Click a diff
   line (or its hover button) to add a comment; "Send to Claude" sends all of the chat's comments as one numbered
   message (queued while busy). Comments live on the chat, unpersisted; lines that vanish after a refresh list under
@@ -227,13 +245,13 @@ the same day. It replaced the idea of tweaking the GTK `claude-session-manager` 
   Context meter bar is segmented by category (muted per-category hues on `--chip-l`); popover adds the last
   turn's input / cache read / cache write / output and cache-hit %.
 - Keep cache warm (per chat, by session id): flame button in the composer toolbar and "Keep cache warm" in the row context menu (turning it on for a closed chat opens it in the background); the cache pill gets a small flame while active. The composer flame turns into a muted blue snowflake (`.icon-btn.cold`, `--ask`) once the cache is cold (also on the sidebar pill when keep-warm is on). `tickKeepWarm` (every 30 s) warms at TTL − min(5 m, 20 % of TTL), only while the chat is idle with nothing pending, never re-warms a cold cache, gives up after 12 h without a real turn (`KEEP_WARM_MAX_IDLE_MS`), pauses while the chat is closed; failures retry after 2 min. Cache time left everywhere = `max(lastAt, warmedAt)`; `/clear` carries the flag to the new session id.
-- Terminal (project chats only; TopBar terminal icon "Terminal (Ctrl+`)" toggles it, the sidebar project menu keeps "Open in terminal" = external app):
+- Terminal (project chats only; tool strip terminal icon "Terminal (Ctrl+`)" toggles it, the sidebar project menu keeps "Open in terminal" = external app):
   Ctrl+` closed → open + focus; open but focus elsewhere → focus it; open and focused → close and focus the composer. While focus is inside
   `.term-panel` every App-level hotkey is skipped (App `onKey` returns early; sidebar arrows, `/`, PlanCard Ctrl+Enter already skip textareas, which
   xterm's helper is; the middle-click mouseup guard skips `.term-panel` so primary-selection paste works) EXCEPT Ctrl+`, Ctrl+Shift+G and
   Ctrl+Tab / Ctrl+Shift+Tab (sidebar capture listener); xterm's `attachCustomKeyEventHandler` returns false for those so the shell never sees
   them. Ctrl+Shift+C copies the selection, Ctrl+Shift+V pastes (`navigator.clipboard`, native paste prevented).
-- Keyboard: Ctrl+N new general chat (project sessions: sidebar project button / "New project session…" on Welcome), Ctrl+Shift+G changes panel, Ctrl+Tab / Ctrl+Shift+Tab open the next/previous visible sidebar row on every press (no need to release Ctrl), Ctrl+W / Alt+W delete the active chat's transcript (closes it if it has none; inside a text field only when it's the empty composer), Alt+Delete = `/clear` (same text-field rule), Ctrl+B in the composer while a turn runs = move foreground tasks to the background (`backgroundTasks`), Ctrl+F find, Ctrl+Q really quit (closing the window only hides it to the tray), Ctrl+R reload,
+- Keyboard: Ctrl+N new general chat (project sessions: sidebar project button), Ctrl+Shift+G changes panel, Ctrl+Tab / Ctrl+Shift+Tab open the next/previous visible sidebar row on every press (no need to release Ctrl), Ctrl+W / Alt+W delete the active chat's transcript (closes it if it has none; inside a text field only when it's the empty composer), Alt+Delete = `/clear` (same text-field rule), Ctrl+B in the composer while a turn runs = move foreground tasks to the background (`backgroundTasks`), Ctrl+F find, Ctrl+Q really quit (closing the window only hides it to the tray), Ctrl+R reload,
   Ctrl+Shift+I DevTools, Esc closes dialogs/pickers/find.
 
 ## Testing without disturbing the user (Hyprland)
@@ -258,7 +276,7 @@ the same day. It replaced the idea of tweaking the GTK `claude-session-manager` 
 
 ## Known gaps
 
-- Linux only, no packaged build (`pnpm package` → unpacked dir).
+- macOS/Windows builds were never run by the author (only built in CI); no auto-update; unsigned by default; mac arm64 only.
 - Subagents tracked only for chats opened in the app, not reconstructed from old transcripts.
 - No rewind
   (candidate next features, in roughly that order of value).

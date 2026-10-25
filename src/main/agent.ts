@@ -9,7 +9,10 @@ import {
   type PermissionUpdate,
 } from '@anthropic-ai/claude-agent-sdk'
 import { existsSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { isAbsolute } from 'node:path'
 import { CHATS_DIR } from './paths'
+import { claudeExecutable } from './claudeBin'
 import type { StartChatOptions, PermissionResponse, PermissionMode, ModelChoice, EffortLevel, SlashCommandInfo, AgentChoice, UserContent, McpServerInfo } from '../shared/types'
 
 /** Minimal push-based async iterable used as the streaming prompt. */
@@ -155,6 +158,8 @@ export class ChatRunner {
       options.sessionId = this.opts.sessionId ?? this.chatId
     }
 
+    const exe = claudeExecutable()
+    if (exe) options.pathToClaudeCodeExecutable = exe
     this.q = query({ prompt: this.queue, options })
     void this.loop()
   }
@@ -258,14 +263,7 @@ export class ChatRunner {
   }
 
   async listModels(): Promise<ModelChoice[]> {
-    const models = (await this.q?.supportedModels()) ?? []
-    return models.map((m) => ({
-      value: m.value,
-      displayName: m.displayName,
-      description: m.description,
-      supportsEffort: m.supportsEffort,
-      efforts: m.supportedEffortLevels,
-    }))
+    return mapModels((await this.q?.supportedModels()) ?? [])
   }
 
   async listCommands(): Promise<SlashCommandInfo[]> {
@@ -285,10 +283,10 @@ export class ChatRunner {
     try {
       const r = await q.request({ subtype: 'file_suggestions', query })
       const list: { path?: unknown }[] = r?.response?.suggestions ?? []
-      const absOk = query.startsWith('/') || query.startsWith('~')
+      const absOk = isAbsolute(query) || query.startsWith('~')
       return list
         .map((s) => (typeof s.path === 'string' ? s.path : ''))
-        .filter((p) => p && (absOk || !p.startsWith('/')))
+        .filter((p) => p && (absOk || !isAbsolute(p)))
     } catch {
       return []
     }
@@ -373,6 +371,65 @@ export class ChatRunner {
     this.abort.abort()
     if (!this.q) this.resolveDone()
     return Promise.race([this.done, new Promise<void>((res) => setTimeout(res, 5000).unref?.())])
+  }
+}
+
+function mapModels(models: Awaited<ReturnType<Query['supportedModels']>>): ModelChoice[] {
+  return models.map((m) => ({
+    value: m.value,
+    displayName: m.displayName,
+    description: m.description,
+    supportsEffort: m.supportsEffort,
+    efforts: m.supportedEffortLevels,
+  }))
+}
+
+let modelsCache: { at: number; models: ModelChoice[] } | undefined
+
+/** All models of the account: any live runner, else a temporary idle query. Non-empty results are cached for 10 minutes. */
+export async function listAllModels(runners: RunnerRegistry, log: (s: string) => void): Promise<ModelChoice[]> {
+  if (modelsCache && Date.now() - modelsCache.at < 600_000) return modelsCache.models
+  const viaTemporaryQuery = async (): Promise<ModelChoice[]> => {
+    let release!: () => void
+    const gate = new Promise<void>((res) => (release = res))
+    async function* idle(): AsyncGenerator<never> {
+      await gate
+    }
+    const exe = claudeExecutable()
+    const q = query({ prompt: idle(), options: { cwd: homedir(), persistSession: false, stderr: (d) => log(d), ...(exe ? { pathToClaudeCodeExecutable: exe } : {}) } })
+    try {
+      return mapModels(await q.supportedModels())
+    } finally {
+      release()
+      try {
+        q.close()
+      } catch {
+        /* already closed */
+      }
+    }
+  }
+  const work = (async () => {
+    try {
+      const m = await runners.any()?.listModels()
+      if (m?.length) return m
+    } catch {
+      /* fall back to a temporary query */
+    }
+    return viaTemporaryQuery()
+  })()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<never>((_, rej) => {
+    timer = setTimeout(() => rej(new Error('Timed out listing models')), 20_000)
+  })
+  try {
+    const models = await Promise.race([work, timeout])
+    if (models.length) modelsCache = { at: Date.now(), models }
+    return models
+  } catch (e) {
+    log(`app:models failed: ${e instanceof Error ? e.message : String(e)}`)
+    return []
+  } finally {
+    clearTimeout(timer)
   }
 }
 

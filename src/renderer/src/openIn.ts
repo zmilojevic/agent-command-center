@@ -8,9 +8,10 @@ async function home(): Promise<string> {
 
 /** Makes `p` absolute: `~/` against the home dir, relative paths against `cwd`. */
 export async function absolutePath(p: string, cwd: string): Promise<string> {
-  if (p.startsWith('/')) return p
-  if (p === '~' || p.startsWith('~/')) return (await home()) + p.slice(1)
-  return `${cwd.replace(/\/+$/, '')}/${p.replace(/^\.\//, '')}`
+  if (p.startsWith('/') || p.startsWith('\\\\') || /^[A-Za-z]:[\\/]/.test(p)) return p
+  if (p === '~' || p.startsWith('~/') || p.startsWith('~\\')) return (await home()) + p.slice(1)
+  const sep = cwd.includes('\\') && !cwd.includes('/') ? '\\' : '/'
+  return `${cwd.replace(/[\\/]+$/, '')}${sep}${p.replace(/^\.[\\/]/, '')}`
 }
 
 /** Splits a `path:line[:col]` suffix off. */

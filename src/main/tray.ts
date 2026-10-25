@@ -1,7 +1,7 @@
-import { app, Menu, Tray, nativeImage, type BrowserWindow } from 'electron'
+import { Menu, Tray, nativeImage, type BrowserWindow } from 'electron'
 import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { resourceFile } from './resources'
 
 interface TrayDeps {
   getWindow: () => BrowserWindow | null
@@ -60,9 +60,24 @@ export function setupTray(deps: TrayDeps): Tray | null {
   const { getWindow, createWindow, quit, log, emit } = deps
   let tray: Tray
   try {
-    const path = join(app.getAppPath(), 'resources', 'icon.png')
-    let img = existsSync(path) ? nativeImage.createFromPath(path) : nativeImage.createEmpty()
-    if (!img.isEmpty()) img = img.resize({ width: 32, height: 32 })
+    const load = (name: string): Electron.NativeImage => {
+      const p = resourceFile(name)
+      return existsSync(p) ? nativeImage.createFromPath(p) : nativeImage.createEmpty()
+    }
+    let img: Electron.NativeImage
+    if (process.platform === 'darwin') {
+      img = load('trayTemplate.png')
+      if (img.isEmpty()) {
+        img = load('icon.png')
+        if (!img.isEmpty()) img = img.resize({ width: 18, height: 18 })
+      } else {
+        img.setTemplateImage(true)
+      }
+    } else {
+      img = load('icon.png')
+      const size = process.platform === 'win32' ? 16 : 32
+      if (!img.isEmpty()) img = img.resize({ width: size, height: size })
+    }
     tray = new Tray(img)
   } catch (err) {
     log(`tray: unavailable: ${String(err)}`)
