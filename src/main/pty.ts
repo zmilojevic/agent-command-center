@@ -1,5 +1,5 @@
 import pty from 'node-pty'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, join, delimiter } from 'node:path'
 import type { PtyInfo } from '../shared/types'
@@ -113,6 +113,24 @@ export class PtyManager {
 
   list(): PtyInfo[] {
     return [...this.terms.values()].map((t) => ({ id: t.id, cwd: t.cwd, pid: t.proc.pid, shell: t.shell, exited: t.exited, code: t.code }))
+  }
+
+  /** True when the shell is the foreground process of its tty (idle prompt, no program running). */
+  isIdle(id: string): boolean {
+    const t = this.terms.get(id)
+    if (!t || t.exited) return false
+    try {
+      if (process.platform === 'linux') {
+        const stat = readFileSync(`/proc/${t.proc.pid}/stat`, 'utf8')
+        // comm (field 2) may contain spaces/parens: parse after the last ')'; then state, ppid, pgrp, session, tty_nr, tpgid
+        const f = stat.slice(stat.lastIndexOf(')') + 2).split(' ')
+        return Number(f[5]) === t.proc.pid
+      }
+      if (process.platform === 'darwin') return basename(t.proc.process) === t.shell
+      return false
+    } catch {
+      return false
+    }
   }
 
   /** Buffered output so far; pending output is flushed first so every later `pty:data` chunk has `end` > the returned `end`. */

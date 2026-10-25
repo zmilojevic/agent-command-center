@@ -53,6 +53,7 @@ export const INVOKES = {
   ptyKill: 'pty:kill',
   ptyList: 'pty:list',
   ptyReplay: 'pty:replay',
+  ptyIdle: 'pty:idle',
   remoteEnable: 'remote:enable',
   remoteDisable: 'remote:disable',
   mobileStatus: 'mobile:status',
@@ -107,6 +108,7 @@ export const PHONE_BLOCKED: ReadonlySet<string> = new Set([
   'pty:kill',
   'pty:list',
   'pty:replay',
+  'pty:idle',
 ])
 
 /** Events that never leave the desktop window. */

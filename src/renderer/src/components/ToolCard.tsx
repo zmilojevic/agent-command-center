@@ -177,7 +177,7 @@ export default function ToolCard({ chatId, block, pending }: { chatId: string; b
       case 'Edit':
         return (
           <>
-            <DiffView oldText={String(i.old_string ?? '')} newText={String(i.new_string ?? '')} />
+            <DiffView oldText={String(i.old_string ?? '')} newText={String(i.new_string ?? '')} path={typeof i.file_path === 'string' ? i.file_path : undefined} />
             {block.result?.isError && <pre className="code out err">{clip(block.result.text)}</pre>}
           </>
         )

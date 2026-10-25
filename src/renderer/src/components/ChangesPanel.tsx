@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { modLabel } from '../util'
-import { RefreshCw, X, ChevronRight, Check, Minus, Undo2, ExternalLink } from 'lucide-react'
+import { modLabel, isPhone } from '../util'
+import { RefreshCw, Columns2, Rows2, PanelLeft, AlignJustify, X, ChevronRight, Check, Minus, Undo2, ExternalLink } from 'lucide-react'
 import { useStore } from '../store'
 import type { ChangedFile } from '@shared/types'
 import UnifiedDiff from './UnifiedDiff'
@@ -70,6 +70,10 @@ export default function ChangesPanel({ chatId }: { chatId: string }) {
   const refreshChanges = useStore((s) => s.refreshChanges)
   const toggleChanges = useStore((s) => s.toggleChanges)
   const sendComments = useStore((s) => s.sendComments)
+  const diffLayout = useStore((s) => s.diffLayout)
+  const setDiffLayout = useStore((s) => s.setDiffLayout)
+  const diffTint = useStore((s) => s.diffTint)
+  const setDiffTint = useStore((s) => s.setDiffTint)
   const removeComment = useStore((s) => s.removeComment)
   const [confirm, setConfirm] = useState<Confirm | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
@@ -108,7 +112,7 @@ export default function ChangesPanel({ chatId }: { chatId: string }) {
   }
 
   return (
-    <section className="changes">
+    <section className="changes" tabIndex={-1}>
       <div className="cp-head">
         <span className="cp-title">Changes</span>
         {files.length > 0 && (
@@ -120,6 +124,24 @@ export default function ChangesPanel({ chatId }: { chatId: string }) {
         <div className="grow" />
         {files.length > 0 && (
           <Dropdown className="cp-commit-dd" value="" options={COMMIT_OPTIONS} labelOverride="Commit…" onChange={askCommit} title="Ask Claude to commit" />
+        )}
+        {files.length > 0 && !isPhone && (
+          <button
+            className="icon-btn tiny"
+            title={diffTint === 'row' ? 'Tint line numbers only' : 'Tint whole lines'}
+            onClick={() => setDiffTint(diffTint === 'row' ? 'gutter' : 'row')}
+          >
+            {diffTint === 'row' ? <PanelLeft size={13} /> : <AlignJustify size={13} />}
+          </button>
+        )}
+        {files.length > 0 && !isPhone && (
+          <button
+            className="icon-btn tiny"
+            title={diffLayout === 'split' ? 'Unified diff' : 'Side-by-side diff'}
+            onClick={() => setDiffLayout(diffLayout === 'split' ? 'unified' : 'split')}
+          >
+            {diffLayout === 'split' ? <Rows2 size={13} /> : <Columns2 size={13} />}
+          </button>
         )}
         <button className="icon-btn tiny" title="Refresh" onClick={() => void refreshChanges(cwd)}>
           <RefreshCw size={13} className={entry?.loading ? 'cp-spin' : ''} />
@@ -205,6 +227,7 @@ export default function ChangesPanel({ chatId }: { chatId: string }) {
                         path={f.path}
                         diff={f.diff}
                         comments={fileComments}
+                        layout={isPhone ? 'unified' : diffLayout}
                         onDiscardHunk={f.status === '?' ? undefined : (patch) => setConfirm({ file: f, patch })}
                       />
                     ) : (

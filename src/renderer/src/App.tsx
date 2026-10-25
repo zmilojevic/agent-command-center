@@ -12,7 +12,7 @@ import ChangesPanel from './components/ChangesPanel'
 import TerminalPanel from './components/TerminalPanel'
 import RightDock from './components/RightDock'
 import ToolStrip from './components/ToolStrip'
-import { initTerminals, focusTerminal, terminalHasFocus } from './terminals'
+import { initTerminals, focusTerminal, terminalHasFocus, setTerminalEscapeHandler } from './terminals'
 import { isPhone } from './util'
 
 /** Fixed pill while the phone's socket to the desktop is down. */
@@ -65,6 +65,11 @@ export default function App() {
     wireEvents()
     if (!isPhone) {
       initTerminals()
+      setTerminalEscapeHandler(() => {
+        const st = useStore.getState()
+        if (st.terminalOpen) st.toggleTerminal()
+        focusComposer()
+      })
       void useStore.getState().restoreTerminals()
     }
     void window.desktop
@@ -163,6 +168,14 @@ export default function App() {
         setShowNewDialog(false)
       } else if (e.key === 'Escape' && useStore.getState().findOpen) {
         setFindOpen(false)
+      } else if (
+        e.key === 'Escape' &&
+        !mod && !e.shiftKey && !e.altKey &&
+        !e.defaultPrevented &&
+        (e.target as Element | null)?.closest?.('section.changes')
+      ) {
+        if (useStore.getState().changesOpen) toggleChanges()
+        focusComposer()
       }
     }
     // Linux/Chromium pastes the primary selection on middle-button mouseup into the focused editable

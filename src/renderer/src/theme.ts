@@ -9,6 +9,12 @@ function apply(theme: Theme): void {
   document.documentElement.dataset.theme = resolved
 }
 
+/** `diffTint` pref → <html data-diff-tint="gutter"> (absent = whole-line tint). */
+function applyTint(t: string): void {
+  if (t === 'gutter') document.documentElement.dataset.diffTint = 'gutter'
+  else delete document.documentElement.dataset.diffTint
+}
+
 /**
  * Keep <html data-theme> in sync with the store's theme pref and the OS setting.
  * The pref is also mirrored into Electron's nativeTheme so the window background and
@@ -16,10 +22,16 @@ function apply(theme: Theme): void {
  * which updates the media query and re-applies here.
  */
 export function initTheme(): void {
+  let tint = useStore.getState().diffTint
+  applyTint(tint)
   let current = useStore.getState().theme
   apply(current)
   window.desktop.setTheme?.(current)
   useStore.subscribe((s) => {
+    if (s.diffTint !== tint) {
+      tint = s.diffTint
+      applyTint(tint)
+    }
     if (s.theme === current) return
     current = s.theme
     apply(current)

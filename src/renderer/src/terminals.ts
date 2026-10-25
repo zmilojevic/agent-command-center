@@ -25,6 +25,14 @@ interface Entry {
   markReady: () => void
   /** Called when the user presses a key after the shell exited (removes the tab). */
   onDismiss?: () => void
+  /** While an Esc idle check is pending, everything typed is held here so it cannot overtake the delayed \x1b. */
+  escBuf: string[] | null
+}
+
+let escapeHandler: (() => void) | null = null
+/** App registers what happens when Esc is pressed at an idle shell prompt (close the panel). */
+export function setTerminalEscapeHandler(fn: (() => void) | null): void {
+  escapeHandler = fn
 }
 
 const entries = new Map<string, Entry>()
@@ -100,21 +108,41 @@ export function ensureTerminal(id: string, exitedCode?: number): Entry {
   term.loadAddon(new WebLinksAddon((_ev, uri) => void window.open(uri)))
   let markReady: () => void = () => {}
   const ready = new Promise<void>((r) => (markReady = r))
-  const entry: Entry = { id, term, fit, opened: false, exited: false, muted: true, replaying: true, queue: [], lastEnd: 0, ready, markReady }
+  const entry: Entry = { id, term, fit, opened: false, exited: false, muted: true, replaying: true, queue: [], lastEnd: 0, ready, markReady, escBuf: null }
   entries.set(id, entry)
 
   term.onData((d) => {
     if (entry.muted) return
     if (entry.exited) entry.onDismiss?.()
+    else if (entry.escBuf) entry.escBuf.push(d)
     else window.desktop.ptyWrite(id, d)
   })
   term.onBinary((d) => {
-    if (!entry.muted && !entry.exited) window.desktop.ptyWrite(id, d)
+    if (entry.muted || entry.exited) return
+    if (entry.escBuf) entry.escBuf.push(d)
+    else window.desktop.ptyWrite(id, d)
   })
   term.onResize(({ cols, rows }) => window.desktop.ptyResize(id, cols, rows))
   term.attachCustomKeyEventHandler((ev) => {
     if (ev.type !== 'keydown') return true
     const k = ev.key
+    if (k === 'Escape' && !ev.ctrlKey && !ev.shiftKey && !ev.altKey && !ev.metaKey && !entry.exited && !entry.muted && escapeHandler) {
+      if (entry.escBuf) entry.escBuf.push('\x1b')
+      else {
+        const buf: string[] = []
+        entry.escBuf = buf
+        void window.desktop
+          .ptyIdle(id)
+          .catch(() => false)
+          .then((idle) => {
+            entry.escBuf = null
+            if (!idle) buf.unshift('\x1b')
+            if (buf.length && !entry.exited) window.desktop.ptyWrite(id, buf.join(''))
+            if (idle) escapeHandler?.()
+          })
+      }
+      return false
+    }
     if (ev.ctrlKey && !ev.shiftKey && !ev.altKey && (k === '`' || ev.code === 'Backquote')) return false // app toggle (window listener)
     if ((ev.ctrlKey || ev.metaKey) && ev.shiftKey && !ev.altKey && k.toLowerCase() === 'g') return false // app: changes panel
     if (isMac && ev.metaKey && (k === 'Tab' || k === '`' || ev.code === 'Backquote')) return false // OS-level, let it through

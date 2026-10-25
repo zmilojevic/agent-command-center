@@ -37,6 +37,14 @@
   --hl-variable: hsl(8 36% 43%);
   --hl-code: hsl(20 34% 38%);
   --hl-path: hsl(208 34% 39%);
+  /* Toned tokens for diffs (see .ud / .diff). */
+  --dhl-keyword: color-mix(in srgb, var(--hl-keyword) 72%, var(--text-2));
+  --dhl-string: color-mix(in srgb, var(--hl-string) 72%, var(--text-2));
+  --dhl-number: color-mix(in srgb, var(--hl-number) 72%, var(--text-2));
+  --dhl-comment: color-mix(in srgb, var(--hl-comment) 72%, var(--text-2));
+  --dhl-title: color-mix(in srgb, var(--hl-title) 72%, var(--text-2));
+  --dhl-type: color-mix(in srgb, var(--hl-type) 72%, var(--text-2));
+  --dhl-variable: color-mix(in srgb, var(--hl-variable) 72%, var(--text-2));
   color-scheme: light;
 }
 
@@ -74,6 +82,14 @@
   --hl-variable: hsl(8 28% 71%);
   --hl-code: hsl(25 30% 71%);
   --hl-path: hsl(205 28% 69%);
+  /* Toned tokens for diffs (see .ud / .diff). */
+  --dhl-keyword: color-mix(in srgb, var(--hl-keyword) 72%, var(--text-2));
+  --dhl-string: color-mix(in srgb, var(--hl-string) 72%, var(--text-2));
+  --dhl-number: color-mix(in srgb, var(--hl-number) 72%, var(--text-2));
+  --dhl-comment: color-mix(in srgb, var(--hl-comment) 72%, var(--text-2));
+  --dhl-title: color-mix(in srgb, var(--hl-title) 72%, var(--text-2));
+  --dhl-type: color-mix(in srgb, var(--hl-type) 72%, var(--text-2));
+  --dhl-variable: color-mix(in srgb, var(--hl-variable) 72%, var(--text-2));
   color-scheme: dark;
 }
 
@@ -1072,6 +1088,21 @@ kbd {
 .hljs-strong,
 .hljs-section {
   font-weight: 600;
+}
+
+.ud,
+.diff {
+  --hl-keyword: var(--dhl-keyword);
+  --hl-string: var(--dhl-string);
+  --hl-number: var(--dhl-number);
+  --hl-comment: var(--dhl-comment);
+  --hl-title: var(--dhl-title);
+  --hl-type: var(--dhl-type);
+  --hl-variable: var(--dhl-variable);
+}
+.ud .hljs-comment,
+.diff .hljs-comment {
+  font-style: normal;
 }
 
 /* ---- thinking ----------------------------------------------------------- */
@@ -2385,7 +2416,7 @@ pre.diff {
   color: color-mix(in srgb, var(--err) 65%, var(--muted));
 }
 .right-dock {
-  width: min(var(--cp-w, 520px), 60%);
+  width: min(var(--cp-w, 520px), calc(100% - 344px)); /* chat column keeps 300 px + 44 px tool strip */
   min-width: min(300px, 50%);
   flex-shrink: 0;
   position: relative;
@@ -2441,6 +2472,7 @@ pre.diff {
   flex-direction: column;
   min-height: 0;
   min-width: 0;
+  outline: none;
 }
 .cp-resize {
   position: absolute;
@@ -2690,6 +2722,31 @@ pre.diff {
 .ud-row:hover .ud-add {
   display: inline-flex;
 }
+.ud-split-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+.ud-split-row .ud-half:last-child {
+  border-left: 1px solid var(--border-2);
+}
+.ud-half {
+  position: relative;
+  display: grid;
+  grid-template-columns: 36px 14px 1fr;
+  min-width: 0;
+}
+.ud-half.add {
+  background: var(--add-bg);
+}
+.ud-half.del {
+  background: var(--del-bg);
+}
+.ud-half.empty {
+  background: color-mix(in srgb, var(--muted) 4%, transparent);
+}
+.ud-half:hover .ud-add {
+  display: inline-flex;
+}
 .ud-editor {
   margin: 4px 8px 6px 56px;
   display: flex;
@@ -2815,4 +2872,41 @@ pre.diff {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+/* ---- diff tint: color only the gutter (pref diffTint -> <html data-diff-tint="gutter">) ---- */
+[data-diff-tint='gutter'] {
+  --gut-add: color-mix(in srgb, var(--add-bg) 85%, var(--ok) 15%);
+  --gut-del: color-mix(in srgb, var(--del-bg) 85%, var(--err) 15%);
+}
+[data-diff-tint='gutter'] .ud-row.add,
+[data-diff-tint='gutter'] .ud-row.del,
+[data-diff-tint='gutter'] .ud-half.add,
+[data-diff-tint='gutter'] .ud-half.del,
+[data-diff-tint='gutter'] .diff-line.add,
+[data-diff-tint='gutter'] .diff-line.del {
+  background: none;
+}
+[data-diff-tint='gutter'] .ud-row.add .ud-no,
+[data-diff-tint='gutter'] .ud-row.add .ud-sign,
+[data-diff-tint='gutter'] .ud-half.add .ud-no,
+[data-diff-tint='gutter'] .ud-half.add .ud-sign,
+[data-diff-tint='gutter'] .diff-line.add .diff-sign {
+  background: var(--gut-add);
+  color: color-mix(in srgb, var(--ok) 65%, var(--muted));
+}
+[data-diff-tint='gutter'] .ud-row.del .ud-no,
+[data-diff-tint='gutter'] .ud-row.del .ud-sign,
+[data-diff-tint='gutter'] .ud-half.del .ud-no,
+[data-diff-tint='gutter'] .ud-half.del .ud-sign,
+[data-diff-tint='gutter'] .diff-line.del .diff-sign {
+  background: var(--gut-del);
+  color: color-mix(in srgb, var(--err) 65%, var(--muted));
+}
+/* small gap between the tinted gutter and the code */
+[data-diff-tint='gutter'] .ud-text {
+  padding-left: 7px;
+}
+[data-diff-tint='gutter'] .diff-sign {
+  margin-right: 7px;
 }

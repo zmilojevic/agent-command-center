@@ -33,7 +33,8 @@ export default function RightDock({ children }: { children: ReactNode }) {
     const row = e.currentTarget.closest('.main-row')
     if (!row) return
     const r = row.getBoundingClientRect()
-    setWidth(Math.min(r.right - e.clientX, r.width * 0.6))
+    // chat column keeps 300 px; the 44 px ToolStrip sits in the row too
+    setWidth(Math.min(r.right - e.clientX, r.width - 344))
   }
   const onSplitMove = (e: RPointerEvent<HTMLDivElement>): void => {
     if (!splitDragging || !dock.current) return

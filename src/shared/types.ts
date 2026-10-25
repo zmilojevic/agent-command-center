@@ -345,6 +345,8 @@ export interface DesktopApi {
   ptyKill(id: string): Promise<void>
   ptyList(): Promise<PtyInfo[]>
   /** Buffered output (capped) plus the total char count it covers; chunks with `end <= end` are already in it. */
+  /** True when the shell itself is the foreground process (idle prompt). */
+  ptyIdle(id: string): Promise<boolean>
   ptyReplay(id: string): Promise<{ data: string; end: number }>
   onPtyData(cb: (e: { id: string; data: string; end: number }) => void): () => void
   onPtyExit(cb: (e: { id: string; code: number }) => void): () => void

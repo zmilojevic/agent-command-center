@@ -118,6 +118,7 @@ interface State {
   lastCwd: string
   notifications: boolean
   theme: Theme
+  diffTint: DiffTint
   /** Preferred editor / terminal ids ('' = first detected; editor 'system' = OS handler). */
   editor: string
   terminal: string
@@ -128,6 +129,7 @@ interface State {
   changes: Record<string, ChangesEntry>
   changesOpen: boolean
   changesWidth: number
+  diffLayout: 'unified' | 'split'
   /** Fraction of the right dock's height given to the top panel (Changes) when Changes and Terminal are both open. */
   dockSplit: number
   /** Integrated terminals per folder (not persisted; the shells live in the main process). */
@@ -166,6 +168,7 @@ interface State {
   removeAttachment(chatId: string, id: string): void
   setNotifications(v: boolean): void
   setTheme(theme: Theme): void
+  setDiffTint(v: DiffTint): void
   setFindOpen(v: boolean): void
   respond(chatId: string, requestId: string, response: Parameters<Window['desktop']['respond']>[2]): Promise<void>
   interrupt(chatId: string): Promise<void>
@@ -177,6 +180,7 @@ interface State {
   setRecentHours(h: number): void
   toggleChanges(): void
   setChangesWidth(px: number): void
+  setDiffLayout(l: 'unified' | 'split'): void
   setDockSplit(f: number): void
   setSidebarWidth(px: number): void
   refreshChanges(cwd: string): Promise<void>
@@ -290,6 +294,9 @@ export function effortFor(cwd: string): string {
   return st.projectDefaults[projectRoot(cwd)]?.effort ?? st.lastEffort
 }
 
+/** Diff add/remove coloring: whole row or only the line-number gutter. */
+export type DiffTint = 'row' | 'gutter'
+
 export const useStore = create<State>()(
   immer((set, get) => ({
     sessions: [],
@@ -325,6 +332,7 @@ export const useStore = create<State>()(
     changes: {},
     changesOpen: prefs.get('changesOpen', false),
     changesWidth: prefs.get('changesWidth', 520),
+    diffLayout: prefs.get<'unified' | 'split'>('diffLayout', 'unified'),
     dockSplit: prefs.get('dockSplit', 0.5),
     terminals: {},
     terminalOpen: prefs.get('terminalOpen', false),
@@ -340,6 +348,7 @@ export const useStore = create<State>()(
     lastCwd: prefs.get('lastCwd', ''),
     notifications: prefs.get('notifications', true),
     theme: prefs.get<Theme>('theme', 'system'),
+    diffTint: prefs.get<DiffTint>('diffTint', 'row'),
     editor: prefs.get('editor', ''),
     terminal: prefs.get('terminal', ''),
     setEditor(id) {
@@ -790,6 +799,13 @@ export const useStore = create<State>()(
       })
     },
 
+    setDiffTint(v) {
+      prefs.set('diffTint', v)
+      set((s) => {
+        s.diffTint = v
+      })
+    },
+
     setFindOpen(v) {
       set((s) => {
         s.findOpen = v
@@ -880,11 +896,19 @@ export const useStore = create<State>()(
     },
 
     setChangesWidth(px) {
-      const w = Math.round(Math.min(1000, Math.max(300, px)))
+      const w = Math.round(Math.max(300, px))
       set((s) => {
         s.changesWidth = w
       })
       prefs.set('changesWidth', w)
+    },
+
+    setDiffLayout(l) {
+      prefs.set('diffLayout', l)
+      set((s) => {
+        s.diffLayout = l
+      })
+      if (l === 'split' && get().changesWidth < 760) get().setChangesWidth(760)
     },
 
     setDockSplit(f) {

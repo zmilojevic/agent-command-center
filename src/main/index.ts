@@ -278,6 +278,7 @@ on('pty:resize', (_ctx, id: string, cols: number, rows: number) => ptys.resize(i
 handle('pty:kill', (_ctx, id: string) => ptys.kill(id))
 handle('pty:list', () => ptys.list())
 handle('pty:replay', (_ctx, id: string) => ptys.replay(id))
+handle('pty:idle', (_ctx, id: string) => ptys.isIdle(id))
 handle('shell:openPath', (_ctx, p: string) => shell.openPath(p))
 handle('app:home', () => homedir())
 handle('app:chatsDir', () => CHATS_DIR)

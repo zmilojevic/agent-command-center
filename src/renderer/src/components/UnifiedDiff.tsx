@@ -1,6 +1,7 @@
-import { useMemo, useState } from 'react'
+import { Fragment, useMemo, useState, type ReactElement } from 'react'
 import { MessageSquarePlus, Pencil, Trash2 } from 'lucide-react'
 import { useStore, type ReviewComment } from '../store'
+import { highlightRows, langForPath } from '../highlight'
 
 type Row =
   | { kind: 'hunk'; text: string }
@@ -35,6 +36,31 @@ const anchor = (r: Row): { side: 'old' | 'new'; line: number } | null => {
   return r.kind === 'del' ? { side: 'old', line: r.oldNo! } : { side: 'new', line: r.newNo! }
 }
 const keyOf = (side: string, line: number): string => `${side}:${line}`
+
+type LineRow = Exclude<Row, { kind: 'hunk' }>
+export type SplitItem = { kind: 'hunk'; text: string } | { kind: 'pair'; left: LineRow | null; right: LineRow | null }
+
+/** Side-by-side pairing: ctx = one paired row, a run of dels followed by adds is paired line by line (filler = null). */
+export function splitRows(rows: Row[]): SplitItem[] {
+  const out: SplitItem[] = []
+  for (let i = 0; i < rows.length; ) {
+    const r = rows[i]
+    if (r.kind === 'hunk') {
+      out.push({ kind: 'hunk', text: r.text })
+      i++
+    } else if (r.kind === 'ctx') {
+      out.push({ kind: 'pair', left: r, right: r })
+      i++
+    } else {
+      const dels: LineRow[] = []
+      const adds: LineRow[] = []
+      while (i < rows.length && rows[i].kind === 'del') dels.push(rows[i++] as LineRow)
+      while (i < rows.length && rows[i].kind === 'add') adds.push(rows[i++] as LineRow)
+      for (let k = 0; k < Math.max(dels.length, adds.length); k++) out.push({ kind: 'pair', left: dels[k] ?? null, right: adds[k] ?? null })
+    }
+  }
+  return out
+}
 
 function CommentEditor({ initial, onSave, onCancel }: { initial: string; onSave: (t: string) => void; onCancel: () => void }) {
   const [text, setText] = useState(initial)
@@ -108,18 +134,21 @@ export default function UnifiedDiff({
   diff,
   comments,
   onDiscardHunk,
+  layout = 'unified',
 }: {
   chatId: string
   path: string
   diff: string
   comments: ReviewComment[]
   onDiscardHunk?: (patch: string) => void
+  layout?: 'unified' | 'split'
 }) {
   const addComment = useStore((s) => s.addComment)
   const updateComment = useStore((s) => s.updateComment)
   const removeComment = useStore((s) => s.removeComment)
   const rows = useMemo(() => parseUnifiedDiff(diff), [diff])
   const patches = useMemo(() => hunkPatches(diff), [diff])
+  const hl = useMemo(() => highlightRows(rows, langForPath(path)), [rows, path])
   let hunkNo = -1
   const [editing, setEditing] = useState<{ key: string; id?: string } | null>(null)
 
@@ -135,69 +164,116 @@ export default function UnifiedDiff({
   }
   const outdated = comments.filter((c) => !present.has(keyOf(c.side, c.line)))
 
+  const hunkHeader = (key: number, text: string): ReactElement => {
+    const patch = patches[++hunkNo]
+    return (
+      <div key={key} className="ud-hunk-row">
+        <div className="ud-hunk">{text}</div>
+        {onDiscardHunk && patch && (
+          <button className="ud-hunk-discard" onClick={() => onDiscardHunk(patch)}>
+            Discard hunk…
+          </button>
+        )}
+      </div>
+    )
+  }
+
+  /** Comment cards and the new-comment editor of one anchor, rendered under its row. */
+  const thread = (r: LineRow): ReactElement => {
+    const a = anchor(r)!
+    const k = keyOf(a.side, a.line)
+    return (
+      <Fragment key={k}>
+        {(byKey.get(k) ?? []).map((c) =>
+          editing?.id === c.id ? (
+            <CommentEditor
+              key={c.id}
+              initial={c.text}
+              onSave={(t) => {
+                updateComment(chatId, c.id, t)
+                setEditing(null)
+              }}
+              onCancel={() => setEditing(null)}
+            />
+          ) : (
+            <CommentCard key={c.id} c={c} onEdit={() => setEditing({ key: k, id: c.id })} onDelete={() => removeComment(chatId, c.id)} />
+          ),
+        )}
+        {editing?.key === k && !editing.id && (
+          <CommentEditor
+            initial=""
+            onSave={(t) => {
+              addComment(chatId, { path, line: a.line, side: a.side, lineText: r.text, text: t })
+              setEditing(null)
+            }}
+            onCancel={() => setEditing(null)}
+          />
+        )}
+      </Fragment>
+    )
+  }
+
+  const half = (r: LineRow | null, side: 'old' | 'new'): ReactElement => {
+    if (!r) return <div className="ud-half empty" />
+    const a = anchor(r)!
+    const open = () => setEditing({ key: keyOf(a.side, a.line) })
+    return (
+      <div className={`ud-half ${r.kind}`}>
+        <button className="ud-add" title="Add comment" onClick={open}>
+          <MessageSquarePlus size={12} />
+        </button>
+        <span className="ud-no" onClick={open}>
+          {side === 'old' ? r.oldNo : r.newNo}
+        </span>
+        <span className="ud-sign">{r.kind === 'add' ? '+' : r.kind === 'del' ? '-' : ''}</span>
+        <span className="ud-text">{hl.get(r) ?? r.text}</span>
+      </div>
+    )
+  }
+
+  const items = layout === 'split' ? splitRows(rows) : null
+
   return (
-    <div className="ud">
-      {rows.map((r, i) => {
-        if (r.kind === 'hunk') {
-          const patch = patches[++hunkNo]
-          return (
-            <div key={i} className="ud-hunk-row">
-              <div className="ud-hunk">{r.text}</div>
-              {onDiscardHunk && patch && (
-                <button className="ud-hunk-discard" onClick={() => onDiscardHunk(patch)}>
-                  Discard hunk…
-                </button>
-              )}
-            </div>
-          )
-        }
-        const a = anchor(r)!
-        const k = keyOf(a.side, a.line)
-        const mine = byKey.get(k) ?? []
-        const open = () => setEditing({ key: k })
-        return (
-          <div key={i}>
-            <div className={`ud-row ${r.kind}`}>
-              <button className="ud-add" title="Add comment" onClick={open}>
-                <MessageSquarePlus size={12} />
-              </button>
-              <span className="ud-no" onClick={open}>
-                {r.oldNo ?? ''}
-              </span>
-              <span className="ud-no" onClick={open}>
-                {r.newNo ?? ''}
-              </span>
-              <span className="ud-sign">{r.kind === 'add' ? '+' : r.kind === 'del' ? '-' : ''}</span>
-              <span className="ud-text">{r.text}</span>
-            </div>
-            {mine.map((c) =>
-              editing?.id === c.id ? (
-                <CommentEditor
-                  key={c.id}
-                  initial={c.text}
-                  onSave={(t) => {
-                    updateComment(chatId, c.id, t)
-                    setEditing(null)
-                  }}
-                  onCancel={() => setEditing(null)}
-                />
-              ) : (
-                <CommentCard key={c.id} c={c} onEdit={() => setEditing({ key: k, id: c.id })} onDelete={() => removeComment(chatId, c.id)} />
-              ),
-            )}
-            {editing?.key === k && !editing.id && (
-              <CommentEditor
-                initial=""
-                onSave={(t) => {
-                  addComment(chatId, { path, line: a.line, side: a.side, lineText: r.text, text: t })
-                  setEditing(null)
-                }}
-                onCancel={() => setEditing(null)}
-              />
-            )}
-          </div>
-        )
-      })}
+    <div className={layout === 'split' ? 'ud split' : 'ud'}>
+      {items
+        ? items.map((it, i) => {
+            if (it.kind === 'hunk') return hunkHeader(i, it.text)
+            const { left, right } = it
+            // ctx has one anchor (new side); otherwise left (old) then right (new)
+            const threads = left && left === right ? [left] : [left, right].filter((x): x is LineRow => !!x)
+            return (
+              <div key={i}>
+                <div className="ud-split-row">
+                  {half(left, 'old')}
+                  {half(right, 'new')}
+                </div>
+                {threads.map(thread)}
+              </div>
+            )
+          })
+        : rows.map((r, i) => {
+            if (r.kind === 'hunk') return hunkHeader(i, r.text)
+            const a = anchor(r)!
+            const open = () => setEditing({ key: keyOf(a.side, a.line) })
+            return (
+              <div key={i}>
+                <div className={`ud-row ${r.kind}`}>
+                  <button className="ud-add" title="Add comment" onClick={open}>
+                    <MessageSquarePlus size={12} />
+                  </button>
+                  <span className="ud-no" onClick={open}>
+                    {r.oldNo ?? ''}
+                  </span>
+                  <span className="ud-no" onClick={open}>
+                    {r.newNo ?? ''}
+                  </span>
+                  <span className="ud-sign">{r.kind === 'add' ? '+' : r.kind === 'del' ? '-' : ''}</span>
+                  <span className="ud-text">{hl.get(r) ?? r.text}</span>
+                </div>
+                {thread(r)}
+              </div>
+            )
+          })}
       {outdated.length > 0 && (
         <div className="ud-outdated">
           <div className="ud-outdated-head">Outdated</div>
