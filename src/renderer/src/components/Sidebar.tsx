@@ -14,6 +14,9 @@ import { dotState, DOT_TITLE } from './TopBar'
 import Dropdown from './Dropdown'
 import { useTooltip } from './Tooltip'
 
+// An expanded project with no listed chats collapses itself after this long.
+const EMPTY_COLLAPSE_MS = 30_000
+
 const WINDOWS = [
   { hours: 6, label: 'Last 6 hours' },
   { hours: 14, label: 'Last 14 hours' },
@@ -107,6 +110,7 @@ export default function Sidebar() {
       /* ignore */
     }
   }
+  const emptyTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
   const [menu, setMenu] = useState<{ x: number; y: number; s: SessionSummary } | null>(null)
   const [home, setHome] = useState('')
   const [renaming, setRenaming] = useState<{ s: SessionSummary; title: string } | null>(null)
@@ -228,6 +232,43 @@ export default function Sidebar() {
   }
 
   const isCollapsedGroup = (g: Group): boolean => collapsed[g.cwd] ?? (g.sessions.length > 12 && !search)
+  useEffect(() => {
+    const timers = emptyTimers.current
+    const eligible = new Set(
+      allGroups.filter((g) => !g.general && !search.trim() && g.sessions.length === 0 && !isCollapsedGroup(g)).map((g) => g.cwd)
+    )
+    for (const [cwd, t] of timers) {
+      if (!eligible.has(cwd)) {
+        clearTimeout(t)
+        timers.delete(cwd)
+      }
+    }
+    for (const cwd of eligible) {
+      if (timers.has(cwd)) continue
+      timers.set(
+        cwd,
+        setTimeout(() => {
+          timers.delete(cwd)
+          setCollapsedState((prev) => {
+            const next = { ...prev, [cwd]: true }
+            try {
+              localStorage.setItem('collapsedProjects', JSON.stringify(next))
+            } catch {
+              /* ignore */
+            }
+            return next
+          })
+        }, EMPTY_COLLAPSE_MS)
+      )
+    }
+  }, [allGroups, collapsed, search])
+  useEffect(() => {
+    const timers = emptyTimers.current
+    return () => {
+      for (const t of timers.values()) clearTimeout(t)
+      timers.clear()
+    }
+  }, [])
   const allCollapsed = allGroups.length > 0 && allGroups.every(isCollapsedGroup)
 
   // When the user switches chat, expand its project if needed and scroll its row into
@@ -247,7 +288,6 @@ export default function Sidebar() {
       document.querySelector('.sidebar .row.active')?.scrollIntoView({ block: 'nearest' })
     })
     return () => cancelAnimationFrame(raf)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSessionId, allGroups, collapsed])
 
   const addProject = async (): Promise<void> => {

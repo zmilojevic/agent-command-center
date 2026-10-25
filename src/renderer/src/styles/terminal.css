@@ -1,0 +1,67 @@
+/* ---- integrated terminal panel (docked in the right column) ---------------------------------- */
+.term-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--bg-2);
+}
+.term-head {
+  gap: 6px;
+}
+.term-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  margin-left: 6px;
+}
+.term-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  height: 24px;
+  padding: 0 4px 0 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.term-tab:hover {
+  background: var(--surface-2);
+  color: var(--text-2);
+}
+.term-tab.active {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.term-tab-x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  color: inherit;
+  opacity: 0.6;
+}
+.term-tab-x:hover {
+  opacity: 1;
+  background: var(--border);
+}
+.term-body {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  padding: 4px 0 4px 10px;
+  overflow: hidden;
+}
+.term-body .xterm {
+  height: 100%;
+}
+.term-body .xterm-viewport {
+  background-color: transparent !important;
+}

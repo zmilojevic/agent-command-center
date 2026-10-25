@@ -11,6 +11,7 @@ import { UsageService } from './usage'
 import { gitChanges, createWorktree, removeWorktree, gitSetStaged, gitDiscardFile, gitDiscardHunk } from './git'
 import { launchTools, openInEditor, openTerminal } from './launch'
 import { RemoteManager } from './remote'
+import { PtyManager } from './pty'
 import { CHATS_DIR } from './paths'
 import { setupTray, focusWindow } from './tray'
 import type { StartChatOptions, PermissionResponse, PermissionMode, UserContent, NotifyRequest, Theme, RemoteEnableInfo } from '../shared/types'
@@ -42,6 +43,7 @@ const log = (s: string): void => {
 mkdirSync(CHATS_DIR, { recursive: true })
 const runners = new RunnerRegistry(emit, log)
 const remote = new RemoteManager(runners, emit, log)
+const ptys = new PtyManager(emit)
 usageService = new UsageService(runners, log, (u) => emit('usage:changed', u))
 
 function createWindow(): void {
@@ -235,6 +237,13 @@ ipcMain.handle('git:discardHunk', (_e, cwd: string, patch: string) => gitDiscard
 ipcMain.handle('app:tools', () => launchTools())
 ipcMain.handle('app:openInEditor', (_e, path: string, line?: number, editorId?: string) => openInEditor(path, line, editorId))
 ipcMain.handle('app:openTerminal', (_e, dir: string, terminalId?: string) => openTerminal(dir, terminalId))
+// ---- IPC: integrated terminal
+ipcMain.handle('pty:create', (_e, cwd: string, cols: number, rows: number) => ptys.create(cwd, cols, rows))
+ipcMain.on('pty:write', (_e, id: string, data: string) => ptys.write(id, data))
+ipcMain.on('pty:resize', (_e, id: string, cols: number, rows: number) => ptys.resize(id, cols, rows))
+ipcMain.handle('pty:kill', (_e, id: string) => ptys.kill(id))
+ipcMain.handle('pty:list', () => ptys.list())
+ipcMain.handle('pty:replay', (_e, id: string) => ptys.replay(id))
 ipcMain.handle('shell:openPath', (_e, p: string) => shell.openPath(p))
 ipcMain.handle('app:home', () => homedir())
 ipcMain.handle('app:chatsDir', () => CHATS_DIR)
@@ -306,9 +315,12 @@ app.on('window-all-closed', () => {
   // With a tray the app lives on; without one the old behaviour applies.
   if (tray && !quitting) return
   runners.closeAll()
+  ptys.killAll()
   app.quit()
 })
 app.on('before-quit', () => {
   quitting = true
   runners.closeAll()
+  ptys.killAll()
 })
+app.on('will-quit', () => ptys.killAll())

@@ -6,7 +6,7 @@ import ContextMeter from './ContextMeter'
 import UsageMeter from './UsageMeter'
 import SettingsPopover from './SettingsPopover'
 import McpPopover from './McpPopover'
-import { openFolderInEditor, openTerminalAt } from '../openIn'
+import { openFolderInEditor } from '../openIn'
 
 /** idle renders no dot (just the spacer); waiting-on-you, busy and finished-unseen do. */
 export type DotState = 'ask' | 'busy' | 'on' | 'idle'
@@ -24,6 +24,8 @@ export default function TopBar() {
   const projectNames = useStore((s) => s.projectNames)
   const changesOpen = useStore((s) => s.changesOpen)
   const toggleChanges = useStore((s) => s.toggleChanges)
+  const terminalOpen = useStore((s) => s.terminalOpen)
+  const toggleTerminal = useStore((s) => s.toggleTerminal)
   const changes = useStore((s) => (activeChatId && s.chats[activeChatId] ? s.changes[s.chats[activeChatId].cwd] : undefined))
   const [home, setHome] = useState('')
   useEffect(() => {
@@ -58,7 +60,7 @@ export default function TopBar() {
               <FolderGit2 size={13} /> <span className="meta-text">{wt.name}</span>
             </span>
           )}
-          <button className="icon-btn tiny" title="Open terminal here" onClick={() => void openTerminalAt(chat.cwd)}>
+          <button className={`icon-btn tiny ${terminalOpen ? 'on' : ''}`} title="Terminal (Ctrl+`)" onClick={toggleTerminal}>
             <SquareTerminal size={14} />
           </button>
           {branch && branch !== 'HEAD' && (

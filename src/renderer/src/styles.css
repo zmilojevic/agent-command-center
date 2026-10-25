@@ -2448,7 +2448,7 @@ pre.diff {
 .cp-del {
   color: color-mix(in srgb, var(--err) 65%, var(--muted));
 }
-.changes {
+.right-dock {
   width: min(var(--cp-w, 520px), 60%);
   min-width: min(300px, 50%);
   flex-shrink: 0;
@@ -2458,6 +2458,53 @@ pre.diff {
   min-height: 0;
   background: var(--bg-2);
   border-left: 1px solid var(--border);
+}
+.dock-pane {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.dock-pane > .changes,
+.dock-pane > .term-panel {
+  flex: 1 1 0;
+  min-height: 0;
+}
+.dock-split {
+  position: relative;
+  flex: 0 0 1px;
+  background: var(--border);
+  z-index: 4;
+  touch-action: none;
+}
+.dock-split::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -3px;
+  height: 7px;
+  cursor: row-resize;
+}
+.dock-split::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 1px;
+  background: transparent;
+}
+.dock-split:hover::after,
+.dock-split.dragging::after {
+  background: var(--accent-muted);
+}
+.changes {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
 }
 .cp-resize {
   position: absolute;

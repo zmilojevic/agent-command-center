@@ -5,7 +5,7 @@ import ImageThumb from './ImageThumb'
 import TasksStrip from './TasksStrip'
 import { useStore, isGeneral } from '../store'
 import { EFFORT_LEVELS, PERMISSION_MODES, type PermissionMode, type SlashCommandInfo, type AgentChoice } from '@shared/types'
-import { modelLabel } from '../util'
+import { modelLabel, fmtTokens } from '../util'
 import { dataUrl, readImages } from '../images'
 
 const FALLBACK_MODELS: { value: string; displayName: string; description?: string }[] = [
@@ -21,6 +21,42 @@ const BUILTIN_COMMANDS: SlashCommandInfo[] = [
   { name: 'compact', description: 'Summarise the conversation to free up context', argumentHint: '[instructions]' },
   { name: 'clear', description: 'Start a fresh session in this folder', argumentHint: '' },
 ]
+
+function ColdCacheConfirm({ coldFor, tokens, onCancel, onConfirm }: { coldFor: number; tokens?: number; onCancel: () => void; onConfirm: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') {
+        e.stopPropagation()
+        onCancel()
+      }
+    }
+    document.addEventListener('keydown', onKey, true)
+    return () => document.removeEventListener('keydown', onKey, true)
+  }, [onCancel])
+  const mins = Math.max(1, Math.round(coldFor / 60000))
+  const ago = mins < 60 ? `${mins} min ago` : `${Math.round(mins / 60)} h ago`
+  return (
+    <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onCancel()}>
+      <div className="modal rename-modal">
+        <div className="modal-head">
+          <h3>Prompt cache is cold</h3>
+        </div>
+        <p className="modal-text">
+          The cache expired {ago} {'\u2014'} this message re-sends the whole conversation{tokens ? ` (~${fmtTokens(tokens)} tokens)` : ''} without
+          cache, which costs more and uses more of your plan limits.
+        </p>
+        <div className="modal-actions">
+          <button className="btn" onClick={onCancel}>
+            Cancel
+          </button>
+          <button className="btn primary" autoFocus onClick={onConfirm}>
+            Send anyway
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 function rankCommands(all: SlashCommandInfo[], q: string): SlashCommandInfo[] {
   const query = q.toLowerCase()
@@ -108,6 +144,9 @@ export default function Composer({ chatId }: { chatId: string }) {
     return () => clearTimeout(t)
   }, [coldAt, cacheBusy])
   const cold = !!coldAt && !cacheBusy && Date.now() >= coldAt
+  const metaTokens = useStore((s) => (sid ? s.meta[sid]?.contextTokens : undefined))
+  const [coldConfirm, setColdConfirm] = useState(false)
+  useEffect(() => setColdConfirm(false), [chatId])
   const general = useStore((s) => isGeneral(s.chats[chatId]?.cwd))
   const ta = useRef<HTMLTextAreaElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -263,6 +302,18 @@ export default function Composer({ chatId }: { chatId: string }) {
       void clearChat(chatId)
       return
     }
+    // Sending on a cold cache re-sends the whole conversation uncached: confirm first (slash commands exempt).
+    if (!busy && !text.startsWith('/') && !!coldAt && Date.now() >= coldAt) {
+      setColdConfirm(true)
+      return
+    }
+    doSend()
+  }
+
+  const doSend = (): void => {
+    const text = draft.trim()
+    const images = chat.attachments
+    if (!text && !images.length) return
     // While Claude works, messages wait in the queue and go out one per finished turn.
     if (busy) enqueue(chatId, text, images)
     else void sendMessage(chatId, text, images, true)
@@ -635,6 +686,21 @@ export default function Composer({ chatId }: { chatId: string }) {
           )}
         </div>
       </div>
+      {coldConfirm && (
+        <ColdCacheConfirm
+          coldFor={Date.now() - coldAt}
+          tokens={chat.context?.totalTokens ?? metaTokens}
+          onCancel={() => {
+            setColdConfirm(false)
+            ta.current?.focus()
+          }}
+          onConfirm={() => {
+            setColdConfirm(false)
+            doSend()
+            ta.current?.focus()
+          }}
+        />
+      )}
     </div>
   )
 }

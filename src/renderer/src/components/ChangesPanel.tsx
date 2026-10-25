@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties, type PointerEvent as RPointerEvent } from 'react'
+import { useEffect, useState } from 'react'
 import { RefreshCw, X, ChevronRight, Check, Minus, Undo2, ExternalLink } from 'lucide-react'
 import { useStore } from '../store'
 import type { ChangedFile } from '@shared/types'
@@ -70,9 +70,6 @@ export default function ChangesPanel({ chatId }: { chatId: string }) {
   const toggleChanges = useStore((s) => s.toggleChanges)
   const sendComments = useStore((s) => s.sendComments)
   const removeComment = useStore((s) => s.removeComment)
-  const width = useStore((s) => s.changesWidth)
-  const setWidth = useStore((s) => s.setChangesWidth)
-  const [dragging, setDragging] = useState(false)
   const [confirm, setConfirm] = useState<Confirm | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [openFiles, setOpenFiles] = useState<Record<string, Record<string, boolean>>>({})
@@ -109,35 +106,8 @@ export default function ChangesPanel({ chatId }: { chatId: string }) {
     else void st.sendMessage(chatId, text)
   }
 
-  const onResizeDown = (e: RPointerEvent<HTMLDivElement>): void => {
-    if (e.button !== 0) return
-    e.currentTarget.setPointerCapture(e.pointerId)
-    document.body.style.userSelect = 'none'
-    setDragging(true)
-  }
-  const onResizeMove = (e: RPointerEvent<HTMLDivElement>): void => {
-    if (!dragging) return
-    const row = e.currentTarget.closest('.main-row')
-    if (!row) return
-    const r = row.getBoundingClientRect()
-    setWidth(Math.min(r.right - e.clientX, r.width * 0.75))
-  }
-  const onResizeUp = (e: RPointerEvent<HTMLDivElement>): void => {
-    if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId)
-    document.body.style.userSelect = ''
-    setDragging(false)
-  }
-
   return (
-    <aside className="changes" style={{ '--cp-w': `${width}px` } as CSSProperties}>
-      <div
-        className={'cp-resize' + (dragging ? ' dragging' : '')}
-        onPointerDown={onResizeDown}
-        onPointerMove={onResizeMove}
-        onPointerUp={onResizeUp}
-        onPointerCancel={onResizeUp}
-        onDoubleClick={() => setWidth(520)}
-      />
+    <section className="changes">
       <div className="cp-head">
         <span className="cp-title">Changes</span>
         {files.length > 0 && (
@@ -248,6 +218,6 @@ export default function ChangesPanel({ chatId }: { chatId: string }) {
         {entry?.truncated && <div className="cp-note small">Too many changes: diffs of the remaining files are not loaded.</div>}
       </div>
       {confirm && <DiscardConfirm confirm={confirm} onCancel={() => setConfirm(null)} onConfirm={doDiscard} />}
-    </aside>
+    </section>
   )
 }

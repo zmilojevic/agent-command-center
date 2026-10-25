@@ -295,6 +295,17 @@ export interface DesktopApi {
   appTools(): Promise<LaunchTools>
   openInEditor(path: string, line?: number, editorId?: string): Promise<string | null>
   openTerminal(dir: string, terminalId?: string): Promise<string | null>
+  // ---- integrated terminal
+  ptyCreate(cwd: string, cols: number, rows: number): Promise<string>
+  /** Fire-and-forget (typing latency). */
+  ptyWrite(id: string, data: string): void
+  ptyResize(id: string, cols: number, rows: number): void
+  ptyKill(id: string): Promise<void>
+  ptyList(): Promise<PtyInfo[]>
+  /** Buffered output (capped) plus the total char count it covers; chunks with `end <= end` are already in it. */
+  ptyReplay(id: string): Promise<{ data: string; end: number }>
+  onPtyData(cb: (e: { id: string; data: string; end: number }) => void): () => void
+  onPtyExit(cb: (e: { id: string; code: number }) => void): () => void
 
   // ---- remote control
   remoteEnable(chatId: string, info: RemoteEnableInfo): Promise<void>
@@ -304,4 +315,14 @@ export interface DesktopApi {
   onRemoteMessage(cb: (e: { chatId: string; text: string; uuid: string }) => void): () => void
   /** Model / permission mode changed from claude.ai. */
   onRemoteSetting(cb: (e: { chatId: string; model?: string; permissionMode?: PermissionMode }) => void): () => void
+}
+
+export interface PtyInfo {
+  id: string
+  cwd: string
+  pid: number
+  /** Shell binary name, e.g. "zsh". */
+  shell: string
+  exited: boolean
+  code?: number
 }

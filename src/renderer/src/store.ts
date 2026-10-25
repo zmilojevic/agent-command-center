@@ -4,6 +4,7 @@ import type { RemoteStateEvent, SessionSummary, PermissionRequest, PermissionMod
 import { applySdkMessage, applyTranscript, emptyModel, findTool, type ChatModel, type Block } from './reduce'
 import type { ImageAttachment } from './images'
 import { basename, projectRoot } from './util'
+import { ensureTerminal, disposeTerminal } from './terminals'
 
 export interface QueuedMessage {
   id: string
@@ -23,6 +24,13 @@ export interface ReviewComment {
 
 /** Keep-warm gives up after this long without a real turn. */
 export const KEEP_WARM_MAX_IDLE_MS = 12 * 3_600_000
+
+export interface TermTab {
+  id: string
+  shell: string
+  /** Stable number within the folder, shown in the tab label ("zsh 2"). */
+  n: number
+}
 
 export type ChangesEntry = GitChanges & { loading?: boolean; fetchedAt?: number }
 
@@ -114,6 +122,12 @@ interface State {
   changes: Record<string, ChangesEntry>
   changesOpen: boolean
   changesWidth: number
+  /** Fraction of the right dock's height given to the top panel (Changes) when Changes and Terminal are both open. */
+  dockSplit: number
+  /** Integrated terminals per folder (not persisted; the shells live in the main process). */
+  terminals: Record<string, { tabs: TermTab[]; active: string | null; counter: number }>
+  terminalOpen: boolean
+  terminalsLoaded: boolean
   sidebarWidth: number
 
   loadSessions(): Promise<void>
@@ -126,6 +140,11 @@ interface State {
   newGeneralChat(): Promise<void>
   activate(chatId: string | null): void
   closeTab(chatId: string): void
+  toggleTerminal(): void
+  restoreTerminals(): Promise<void>
+  newTerminal(cwd: string): Promise<void>
+  killTerminal(id: string): void
+  setActiveTerminal(cwd: string, id: string): void
   clearChat(chatId: string): Promise<void>
   setKeepWarm(sessionId: string, on: boolean): void
   /** Remote Control (claude.ai/code, mobile app) for a session; project chats only. */
@@ -151,6 +170,7 @@ interface State {
   setRecentHours(h: number): void
   toggleChanges(): void
   setChangesWidth(px: number): void
+  setDockSplit(f: number): void
   setSidebarWidth(px: number): void
   refreshChanges(cwd: string): Promise<void>
   addComment(chatId: string, c: Omit<ReviewComment, 'id'>): void
@@ -244,6 +264,10 @@ export const useStore = create<State>()(
     changes: {},
     changesOpen: prefs.get('changesOpen', false),
     changesWidth: prefs.get('changesWidth', 520),
+    dockSplit: prefs.get('dockSplit', 0.5),
+    terminals: {},
+    terminalOpen: prefs.get('terminalOpen', false),
+    terminalsLoaded: false,
     sidebarWidth: prefs.get('sidebarWidth', 390),
     search: '',
     recentHours: prefs.get('recentHours', 14),
@@ -788,6 +812,14 @@ export const useStore = create<State>()(
       prefs.set('changesWidth', w)
     },
 
+    setDockSplit(f) {
+      const v = Math.round(Math.min(0.9, Math.max(0.1, f)) * 1000) / 1000
+      set((s) => {
+        s.dockSplit = v
+      })
+      prefs.set('dockSplit', v)
+    },
+
     setSidebarWidth(px) {
       const w = Math.round(Math.min(640, Math.max(320, px)))
       set((s) => {
@@ -805,6 +837,71 @@ export const useStore = create<State>()(
       })
       const c = get().activeChatId ? get().chats[get().activeChatId!] : undefined
       if (get().changesOpen && c) void get().refreshChanges(c.cwd)
+    },
+
+    toggleTerminal() {
+      const active = get().activeChatId ? get().chats[get().activeChatId!] : undefined
+      if (active && isGeneral(active.cwd)) return
+      set((s) => {
+        s.terminalOpen = !s.terminalOpen
+        prefs.set('terminalOpen', s.terminalOpen)
+      })
+    },
+
+    async restoreTerminals() {
+      const list = await window.desktop.ptyList().catch(() => [])
+      for (const info of list) ensureTerminal(info.id, info.exited ? (info.code ?? 0) : undefined)
+      set((s) => {
+        for (const info of list) {
+          const f = (s.terminals[info.cwd] ??= { tabs: [], active: null, counter: 0 })
+          f.tabs.push({ id: info.id, shell: info.shell, n: ++f.counter })
+          f.active ??= info.id
+        }
+        s.terminalsLoaded = true
+      })
+    },
+
+    async newTerminal(cwd) {
+      if (isGeneral(cwd) || terminalCreating.has(cwd)) return
+      terminalCreating.add(cwd)
+      try {
+        const id = await window.desktop.ptyCreate(cwd, 80, 24)
+        ensureTerminal(id)
+        const shell = (await window.desktop.ptyList().catch(() => [])).find((i) => i.id === id)?.shell ?? 'shell'
+        set((s) => {
+          const f = (s.terminals[cwd] ??= { tabs: [], active: null, counter: 0 })
+          f.tabs.push({ id, shell, n: ++f.counter })
+          f.active = id
+        })
+      } finally {
+        terminalCreating.delete(cwd)
+      }
+    },
+
+    killTerminal(id) {
+      const cwd = Object.keys(get().terminals).find((k) => get().terminals[k].tabs.some((t) => t.id === id))
+      if (!cwd) return
+      void window.desktop.ptyKill(id)
+      disposeTerminal(id)
+      set((s) => {
+        const f = s.terminals[cwd]
+        const i = f.tabs.findIndex((t) => t.id === id)
+        f.tabs.splice(i, 1)
+        if (f.active === id) f.active = f.tabs[Math.min(i, f.tabs.length - 1)]?.id ?? null
+        const activeCwd = s.activeChatId ? s.chats[s.activeChatId]?.cwd : undefined
+        // Closing the last shell of the visible folder closes the panel (no respawn).
+        if (!f.tabs.length && cwd === activeCwd && s.terminalOpen) {
+          s.terminalOpen = false
+          prefs.set('terminalOpen', false)
+          setTimeout(() => document.querySelector<HTMLTextAreaElement>('.composer textarea')?.focus(), 0)
+        }
+      })
+    },
+
+    setActiveTerminal(cwd, id) {
+      set((s) => {
+        if (s.terminals[cwd]) s.terminals[cwd].active = id
+      })
     },
 
     async refreshChanges(cwd) {
@@ -1142,6 +1239,8 @@ function formatComments(comments: ReviewComment[]): string {
 let wired = false
 let tabsRestored = false
 let lastTabsKey = ''
+const terminalCreating = new Set<string>()
+
 export function wireEvents(): void {
   if (wired) return
   wired = true

@@ -65,6 +65,16 @@ const api: DesktopApi = {
   openInEditor: (path, line, editorId) => ipcRenderer.invoke('app:openInEditor', path, line, editorId),
   openTerminal: (dir, terminalId) => ipcRenderer.invoke('app:openTerminal', dir, terminalId),
 
+  // ---- integrated terminal
+  ptyCreate: (cwd, cols, rows) => ipcRenderer.invoke('pty:create', cwd, cols, rows),
+  ptyWrite: (id, data) => ipcRenderer.send('pty:write', id, data),
+  ptyResize: (id, cols, rows) => ipcRenderer.send('pty:resize', id, cols, rows),
+  ptyKill: (id) => ipcRenderer.invoke('pty:kill', id),
+  ptyList: () => ipcRenderer.invoke('pty:list'),
+  ptyReplay: (id) => ipcRenderer.invoke('pty:replay', id),
+  onPtyData: on('pty:data'),
+  onPtyExit: on('pty:exit'),
+
   // ---- remote control
   remoteEnable: (chatId, info) => ipcRenderer.invoke('remote:enable', chatId, info),
   remoteDisable: (chatId) => ipcRenderer.invoke('remote:disable', chatId),

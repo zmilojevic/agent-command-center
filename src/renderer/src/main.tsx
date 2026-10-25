@@ -9,6 +9,7 @@ import './styles/tasks.css'
 import './styles/mcp-worktree.css'
 import './styles/changes-open.css'
 import './styles/remote.css'
+import './styles/terminal.css'
 
 // Apply the saved theme before the first paint so the window never flashes the wrong palette.
 initTheme()
