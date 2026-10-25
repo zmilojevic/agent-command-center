@@ -24,6 +24,7 @@ linux:
     - target: deb
       arch: x64
   executableName: agent-command-center
+  maintainer: Zeljko Milojevic <zmilojevic@users.noreply.github.com>
   category: Development
   icon: icon.png
   desktop:

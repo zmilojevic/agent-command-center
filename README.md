@@ -77,7 +77,7 @@ the Claude Code CLI login (see Requirements).
 
 - Linux: `chmod +x agent-command-center-*.AppImage && ./agent-command-center-*.AppImage`, or `sudo apt install ./agent-command-center-*.deb`.
 - macOS: open the dmg and drag the app to Applications. An unsigned build is blocked by Gatekeeper: run
-  `xattr -cr "/Applications/Agent Command Center.app"` once, or right-click the app and choose Open.
+  `xattr -cr "/Applications/Agent Command Center.app"` once (or, after the first blocked launch, System Settings → Privacy & Security → "Open Anyway"; right-click → Open no longer works since macOS 15).
 - Windows: run the installer. SmartScreen may warn for an unsigned build: "More info" then "Run anyway".
   Install Git for Windows as well; Claude Code's Bash tool uses Git Bash.
 
