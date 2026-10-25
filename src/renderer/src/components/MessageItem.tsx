@@ -31,7 +31,7 @@ export default function MessageItem({
               {images.map((b, i) => (b.kind === 'image' ? <ImageThumb key={i} src={dataUrl(b.mediaType, b.data)} /> : null))}
             </div>
           )}
-          {message.blocks.map((b, i) => (b.kind === 'text' ? <Markdown key={i} text={b.text} /> : null))}
+          {message.blocks.map((b, i) => (b.kind === 'text' ? <Markdown key={i} text={b.text} files /> : null))}
         </div>
       </div>
     )

@@ -50,6 +50,21 @@ export interface Subagent {
   hidden?: boolean
 }
 
+export interface BgTask {
+  taskId: string
+  /** local_bash, local_workflow, monitor_mcp, monitor_ws, remote_agent, local_command, ... */
+  type: string
+  description: string
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'stopped' | 'killed' | 'paused'
+  toolUseId?: string
+  startedAt: number
+  endedAt?: number
+  backgrounded: boolean
+  ambient: boolean
+  summary?: string
+  error?: string
+}
+
 export interface ChatMessage {
   id: string
   role: 'user' | 'assistant' | 'divider'
@@ -82,12 +97,18 @@ export interface ChatModel {
   interrupted?: boolean
   /** Subagents started by this chat while it was open (not restored from transcripts). */
   subagents: Subagent[]
+  /** Background shells, monitors and workflows (everything except subagents). */
+  tasks: BgTask[]
   /** Command names from the init message; a fallback for the slash-command picker. */
   slashCommands?: string[]
 }
 
 export function emptyModel(): ChatModel {
-  return { messages: [], status: 'starting', totalCost: 0, subagents: [] }
+  return { messages: [], status: 'starting', totalCost: 0, subagents: [], tasks: [] }
+}
+
+function isLive(t: BgTask): boolean {
+  return t.status === 'running' || t.status === 'pending' || t.status === 'paused'
 }
 
 const AGENT_TOOLS = new Set(['Agent', 'Task'])
@@ -338,8 +359,20 @@ function applySystem(model: ChatModel, m: any): void {
       return
     case 'task_started': {
       // Only subagents; background shells and monitors are tasks too.
+      if (m.task_type && m.task_type !== 'local_agent') {
+        let t = model.tasks.find((x) => x.taskId === m.task_id)
+        if (!t) {
+          t = { taskId: m.task_id, type: m.task_type, description: '', status: 'running', startedAt: Date.now(), backgrounded: false, ambient: false }
+          model.tasks.push(t)
+        }
+        t.type = m.task_type
+        if (m.description) t.description = m.description
+        if (m.tool_use_id) t.toolUseId = m.tool_use_id
+        t.backgrounded = !!m.is_backgrounded
+        t.ambient = !!(m.ambient || m.skip_transcript)
+        return
+      }
       if (m.skip_transcript || m.ambient) return
-      if (m.task_type && m.task_type !== 'local_agent') return
       let a = findSubagent(model, { toolUseId: m.tool_use_id, taskId: m.task_id })
       if (!a) {
         a = { toolUseId: m.tool_use_id ?? m.task_id, description: '', status: 'running', startedAt: Date.now(), toolCalls: 0 }
@@ -363,6 +396,18 @@ function applySystem(model: ChatModel, m: any): void {
       return
     }
     case 'task_updated': {
+      const t = model.tasks.find((x) => x.taskId === m.task_id)
+      if (t) {
+        const p = m.patch ?? {}
+        if (p.description) t.description = String(p.description)
+        if (typeof p.is_backgrounded === 'boolean') t.backgrounded = p.is_backgrounded
+        if (p.error) t.error = String(p.error)
+        if (p.status) {
+          t.status = p.status
+          if (!isLive(t)) t.endedAt = typeof p.end_time === 'number' ? p.end_time : (t.endedAt ?? Date.now())
+        }
+        return
+      }
       const a = findSubagent(model, { taskId: m.task_id })
       const st = m.patch?.status
       if (!a || !st) return
@@ -375,6 +420,14 @@ function applySystem(model: ChatModel, m: any): void {
       return
     }
     case 'task_notification': {
+      const t = model.tasks.find((x) => x.taskId === m.task_id)
+      if (t) {
+        // The preceding task_updated usually set killed/failed already; keep the more specific one.
+        if (isLive(t) || t.status === 'completed') t.status = m.status === 'completed' ? 'completed' : m.status === 'failed' ? 'failed' : 'stopped'
+        t.endedAt ??= Date.now()
+        if (m.summary) t.summary = String(m.summary)
+        return
+      }
       const a = findSubagent(model, { toolUseId: m.tool_use_id, taskId: m.task_id })
       if (!a) return
       a.status = m.status === 'completed' ? 'done' : 'failed'
@@ -385,6 +438,20 @@ function applySystem(model: ChatModel, m: any): void {
       if (m.usage) {
         a.toolCalls = Math.max(a.toolCalls, m.usage.tool_uses ?? 0)
         a.tokens = m.usage.total_tokens
+      }
+      return
+    }
+    case 'background_tasks_changed': {
+      const live = new Map<string, any>((Array.isArray(m.tasks) ? m.tasks : []).map((x: any) => [x.task_id, x]))
+      for (const [id, x] of live) {
+        if (x.task_type === 'local_agent' || model.tasks.some((t) => t.taskId === id)) continue
+        model.tasks.push({ taskId: id, type: x.task_type, description: x.description ?? '', status: 'running', startedAt: Date.now(), backgrounded: true, ambient: !!x.ambient })
+      }
+      for (const t of model.tasks) {
+        if (t.backgrounded && isLive(t) && !live.has(t.taskId)) {
+          t.status = 'completed'
+          t.endedAt ??= Date.now()
+        }
       }
       return
     }

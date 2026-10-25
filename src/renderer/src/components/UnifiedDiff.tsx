@@ -93,12 +93,34 @@ function CommentCard({ c, onEdit, onDelete, outdated }: { c: ReviewComment; onEd
   )
 }
 
-/** One file's diff with hover "+" buttons to attach review comments to lines. */
-export default function UnifiedDiff({ chatId, path, diff, comments }: { chatId: string; path: string; diff: string; comments: ReviewComment[] }) {
+/** One patch per hunk: the file's header lines (up to the first @@) plus that single hunk. */
+function hunkPatches(diff: string): string[] {
+  const lines = diff.split('\n')
+  const starts = lines.reduce<number[]>((a, l, i) => (l.startsWith('@@') ? [...a, i] : a), [])
+  const header = lines.slice(0, starts[0] ?? 0)
+  return starts.map((s, k) => [...header, ...lines.slice(s, starts[k + 1] ?? lines.length)].join('\n') + '\n')
+}
+
+/** One file's diff with hover "+" buttons to attach review comments to lines. `onDiscardHunk` adds a hover action on hunk headers. */
+export default function UnifiedDiff({
+  chatId,
+  path,
+  diff,
+  comments,
+  onDiscardHunk,
+}: {
+  chatId: string
+  path: string
+  diff: string
+  comments: ReviewComment[]
+  onDiscardHunk?: (patch: string) => void
+}) {
   const addComment = useStore((s) => s.addComment)
   const updateComment = useStore((s) => s.updateComment)
   const removeComment = useStore((s) => s.removeComment)
   const rows = useMemo(() => parseUnifiedDiff(diff), [diff])
+  const patches = useMemo(() => hunkPatches(diff), [diff])
+  let hunkNo = -1
   const [editing, setEditing] = useState<{ key: string; id?: string } | null>(null)
 
   const byKey = new Map<string, ReviewComment[]>()
@@ -117,9 +139,15 @@ export default function UnifiedDiff({ chatId, path, diff, comments }: { chatId: 
     <div className="ud">
       {rows.map((r, i) => {
         if (r.kind === 'hunk') {
+          const patch = patches[++hunkNo]
           return (
-            <div key={i} className="ud-hunk">
-              {r.text}
+            <div key={i} className="ud-hunk-row">
+              <div className="ud-hunk">{r.text}</div>
+              {onDiscardHunk && patch && (
+                <button className="ud-hunk-discard" onClick={() => onDiscardHunk(patch)}>
+                  Discard hunk…
+                </button>
+              )}
             </div>
           )
         }

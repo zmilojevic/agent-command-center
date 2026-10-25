@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUp, Square, Eraser, X, Clock, ImagePlus, CornerDownLeft, Flame, Snowflake } from 'lucide-react'
+import { ArrowUp, Square, Eraser, X, Clock, ImagePlus, CornerDownLeft, Flame, Snowflake, File, Folder, Smartphone } from 'lucide-react'
 import Dropdown from './Dropdown'
 import ImageThumb from './ImageThumb'
+import TasksStrip from './TasksStrip'
 import { useStore, isGeneral } from '../store'
 import { EFFORT_LEVELS, PERMISSION_MODES, type PermissionMode, type SlashCommandInfo, type AgentChoice } from '@shared/types'
 import { modelLabel } from '../util'
@@ -48,7 +49,6 @@ function rankAgents(all: AgentChoice[], q: string): AgentChoice[] {
     if (n === query) return 0
     if (n.startsWith(query)) return 1
     if (n.includes(query)) return 2
-    if (a.description.toLowerCase().includes(query)) return 3
     return -1
   }
   return all
@@ -56,6 +56,21 @@ function rankAgents(all: AgentChoice[], q: string): AgentChoice[] {
     .filter((x) => x.s >= 0)
     .sort((x, y) => x.s - y.s || x.a.name.localeCompare(y.a.name))
     .map((x) => x.a)
+}
+
+type MentionItem = { kind: 'agent'; a: AgentChoice } | { kind: 'file'; path: string }
+
+/** A file path as shown in the picker, the basename emphasised. */
+function FilePath({ path }: { path: string }) {
+  const trimmed = path.replace(/\/$/, '')
+  const cut = trimmed.lastIndexOf('/') + 1
+  return (
+    <span className="file-path" title={path}>
+      {trimmed.slice(0, cut)}
+      <span className="file-base">{trimmed.slice(cut)}</span>
+      {path.endsWith('/') ? '/' : ''}
+    </span>
+  )
 }
 
 export default function Composer({ chatId }: { chatId: string }) {
@@ -75,6 +90,9 @@ export default function Composer({ chatId }: { chatId: string }) {
   const clearChat = useStore((s) => s.clearChat)
   const setKeepWarm = useStore((s) => s.setKeepWarm)
   const keepWarm = useStore((s) => (chat?.sessionId ? s.keepWarm.includes(chat.sessionId) : false))
+  const setRemote = useStore((s) => s.setRemote)
+  const remoteWanted = useStore((s) => (chat?.sessionId ? s.remoteSessions.includes(chat.sessionId) : false))
+  const remote = useStore((s) => s.remote[chatId])
   const sid = chat?.sessionId
   const lastAt = useStore((s) => (sid ? s.chats[chatId]?.lastResponseAt || s.meta[sid]?.lastAt || 0 : 0))
   const warmedAt = useStore((s) => (sid ? s.warmedAt[sid] ?? 0 : 0))
@@ -99,6 +117,10 @@ export default function Composer({ chatId }: { chatId: string }) {
   const [dropping, setDropping] = useState(false)
   const [caret, setCaret] = useState(0)
   const [mentionDismissed, setMentionDismissed] = useState(false)
+  const [fileMatches, setFileMatches] = useState<string[]>([])
+  const fileSeq = useRef(0)
+  const prevMode = useRef<PermissionMode | null>(null)
+  const runnerGen = chat?.gen
 
   useEffect(() => {
     // Don't steal focus from the sidebar (e.g. Delete closed the active chat and focus moved
@@ -131,16 +153,58 @@ export default function Composer({ chatId }: { chatId: string }) {
   const matches = useMemo(() => (slashQuery == null ? [] : rankCommands(allCommands, slashQuery)), [allCommands, slashQuery])
   const slashOpen = slashQuery != null && !dismissed && matches.length > 0
 
-  // @agent mentions: the token ending at the caret, e.g. "fix this @exp".
-  const mentionMatch = slashQuery == null && !general ? /(^|\s)@([\w.:-]*)$/.exec(draft.slice(0, caret)) : null
-  const mentionQuery = mentionMatch ? mentionMatch[2] : null
+  // @ mentions (agents and files): the token ending at the caret, e.g. "fix this @exp" or `@"my dir/`.
+  const mentionMatch = slashQuery == null && !general ? /(^|\s)@("[^"\n]*|[^\s@"]*)$/.exec(draft.slice(0, caret)) : null
+  const mentionQuery = mentionMatch ? mentionMatch[2].replace(/^"/, '') : null
   const agentMatches = useMemo(
-    () => (mentionQuery == null ? [] : rankAgents(chat?.agents ?? [], mentionQuery)),
+    () => (mentionQuery == null || /[/~]/.test(mentionQuery) ? [] : rankAgents(chat?.agents ?? [], mentionQuery)),
     [chat?.agents, mentionQuery],
   )
-  const mentionOpen = mentionQuery != null && !mentionDismissed && agentMatches.length > 0
+  const mentionItems = useMemo<MentionItem[]>(
+    () => {
+      const q = (mentionQuery ?? '').toLowerCase().replace(/^agent-/, '')
+      const agent = (a: AgentChoice): MentionItem => ({ kind: 'agent', a })
+      const files = fileMatches.slice(0, 12).map((path): MentionItem => ({ kind: 'file', path }))
+      if (!q) return [...agentMatches.map(agent), ...files]
+      const first = agentMatches.filter((a) => a.name.toLowerCase().startsWith(q))
+      const rest = agentMatches.filter((a) => !a.name.toLowerCase().startsWith(q))
+      return [...first.map(agent), ...files, ...rest.map(agent)]
+    },
+    [agentMatches, fileMatches, mentionQuery],
+  )
+  const mentionOpen = mentionQuery != null && !mentionDismissed && mentionItems.length > 0
   const pickerOpen = slashOpen || mentionOpen
-  const listLen = slashOpen ? matches.length : agentMatches.length
+  const listLen = slashOpen ? matches.length : mentionItems.length
+
+  // Files for the token: debounced, stale answers dropped; an empty answer to a non-empty
+  // query is retried once (the CLI's index is still building right after startup).
+  useEffect(() => {
+    if (mentionQuery == null) {
+      fileSeq.current++
+      setFileMatches([])
+      return
+    }
+    const seq = ++fileSeq.current
+    let retry: ReturnType<typeof setTimeout> | undefined
+    const ask = (again: boolean): void => {
+      void window.desktop.fileSuggestions(chatId, mentionQuery).then((r) => {
+        if (seq !== fileSeq.current) return
+        setFileMatches(r)
+        if (!r.length && mentionQuery && again) retry = setTimeout(() => ask(false), 600)
+      })
+    }
+    const t = setTimeout(() => ask(true), 80)
+    return () => {
+      clearTimeout(t)
+      clearTimeout(retry)
+    }
+  }, [chatId, mentionQuery])
+
+  // Warm the CLI's file index once per runner generation.
+  useEffect(() => {
+    if (general || runnerGen == null) return
+    void window.desktop.fileSuggestions(chatId, '')
+  }, [chatId, runnerGen, general])
 
   // Prompt history (Up/Down like a terminal): sent prompts of this chat, newest last.
   const history = useMemo<string[]>(() => {
@@ -222,6 +286,31 @@ export default function Composer({ chatId }: { chatId: string }) {
     requestAnimationFrame(() => ta.current?.setSelectionRange(pos, pos))
   }
 
+  const pickFile = (path: string): void => {
+    if (!mentionMatch) return
+    const start = caret - mentionMatch[2].length - 1
+    const dir = path.endsWith('/')
+    const spaced = /\s/.test(path)
+    const insert = dir ? (spaced ? `@"${path}` : `@${path}`) : spaced ? `@"${path}" ` : `@${path} `
+    setDraft(chatId, draft.slice(0, start) + insert + draft.slice(caret))
+    const pos = start + insert.length
+    setCaret(pos)
+    // A folder keeps the picker open so the user can drill in.
+    if (!dir) setMentionDismissed(true)
+    ta.current?.focus()
+    requestAnimationFrame(() => ta.current?.setSelectionRange(pos, pos))
+  }
+
+  const pickMention = (it: MentionItem): void => (it.kind === 'agent' ? pickAgent(it.a) : pickFile(it.path))
+
+  const togglePlan = (): void => {
+    if (currentMode === 'plan') void setMode(chatId, prevMode.current && prevMode.current !== 'plan' ? prevMode.current : 'bypassPermissions')
+    else {
+      prevMode.current = currentMode
+      void setMode(chatId, 'plan')
+    }
+  }
+
   const addFiles = async (files: File[]): Promise<void> => {
     const imgs = await readImages(files.filter((f) => f.type.startsWith('image/')))
     if (imgs.length) addAttachments(chatId, imgs)
@@ -256,6 +345,7 @@ export default function Composer({ chatId }: { chatId: string }) {
         void addFiles([...e.dataTransfer.files])
       }}
     >
+      {!general && <TasksStrip chatId={chatId} />}
       {chat.queue.length > 0 && (
         <div className="queue">
           {chat.queue.map((q) => (
@@ -278,24 +368,31 @@ export default function Composer({ chatId }: { chatId: string }) {
       <div className={`composer ${dropping ? 'dropping' : ''}`}>
         {mentionOpen && (
           <div className="dd-menu dd-up slash-menu" role="listbox" ref={menuRef}>
-            {agentMatches.map((a, i) => (
+            {mentionItems.map((it, i) => (
               <button
                 type="button"
-                key={a.name}
+                key={it.kind === 'agent' ? `a:${it.a.name}` : `f:${it.path}`}
                 role="option"
                 aria-selected={i === hi}
                 className={`dd-item ${i === hi ? 'hi' : ''}`}
                 onMouseEnter={() => setHi(i)}
                 onMouseDown={(e) => e.preventDefault()}
-                onClick={() => pickAgent(a)}
+                onClick={() => pickMention(it)}
               >
-                <span className="dd-item-text">
-                  <span className="dd-item-label">
-                    <span className="slash-name">@agent-{a.name}</span>
-                    {a.model && a.model !== 'inherit' && <span className="slash-hint">{a.model}</span>}
+                {it.kind === 'agent' ? (
+                  <span className="dd-item-text">
+                    <span className="dd-item-label">
+                      <span className="slash-name">@agent-{it.a.name}</span>
+                      {it.a.model && it.a.model !== 'inherit' && <span className="slash-hint">{it.a.model}</span>}
+                    </span>
+                    {it.a.description && <span className="dd-item-desc">{it.a.description}</span>}
                   </span>
-                  {a.description && <span className="dd-item-desc">{a.description}</span>}
-                </span>
+                ) : (
+                  <span className="file-row">
+                    {it.path.endsWith('/') ? <Folder size={14} /> : <File size={14} />}
+                    <FilePath path={it.path} />
+                  </span>
+                )}
               </button>
             ))}
           </div>
@@ -339,7 +436,7 @@ export default function Composer({ chatId }: { chatId: string }) {
         <textarea
           ref={ta}
           value={draft}
-          placeholder={busy ? 'Claude is working — Enter queues the message, Esc stops' : general ? 'Message Claude…' : 'Message Claude… (Enter to send, / for commands, @ for agents, paste or drop images)'}
+          placeholder={busy ? 'Claude is working — Enter queues the message, Esc stops' : general ? 'Message Claude…' : 'Message Claude… (Enter to send, / for commands, @ for files and agents, paste or drop images)'}
           onChange={(e) => {
             setDraft(chatId, e.target.value)
             setCaret(e.target.selectionStart)
@@ -354,6 +451,11 @@ export default function Composer({ chatId }: { chatId: string }) {
             void addFiles(files)
           }}
           onKeyDown={(e) => {
+            if (e.key === 'b' && e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey && busy) {
+              e.preventDefault()
+              void window.desktop.backgroundTasks(chatId)
+              return
+            }
             if (!pickerOpen && e.key === 'Escape' && busy) {
               e.preventDefault()
               void interrupt(chatId)
@@ -374,10 +476,10 @@ export default function Composer({ chatId }: { chatId: string }) {
                 return
               }
               if (mentionOpen && (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey))) {
-                const a = agentMatches[hi]
-                if (a) {
+                const it = mentionItems[hi]
+                if (it) {
                   e.preventDefault()
-                  pickAgent(a)
+                  pickMention(it)
                   return
                 }
               }
@@ -395,6 +497,11 @@ export default function Composer({ chatId }: { chatId: string }) {
                   return
                 }
               }
+            }
+            if (e.key === 'Tab' && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey && !pickerOpen && !general) {
+              e.preventDefault()
+              togglePlan()
+              return
             }
             if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
               const cur = histIdx.current
@@ -484,6 +591,26 @@ export default function Composer({ chatId }: { chatId: string }) {
           >
             {cold ? <Snowflake size={16} /> : <Flame size={16} />}
           </button>
+          {!general && (
+            <button
+              className={`icon-btn remote-btn${remoteWanted ? ' on' : ''}${remote?.state === 'on' ? ' connected' : ''}${remote?.state === 'error' ? ' error' : ''}${remote?.state === 'connecting' ? ' connecting' : ''}`}
+              disabled={!chat?.sessionId}
+              title={
+                remote?.state === 'error'
+                  ? `Remote Control error: ${remote.error ?? 'unknown'} (click to switch off)`
+                  : remote?.state === 'connecting'
+                    ? 'Remote Control: connecting…'
+                    : remote?.state === 'on'
+                      ? `Remote Control on – open claude.ai/code or the Claude app${remote.url ? `\n${remote.url}` : ''}\n(click to switch off)`
+                      : remoteWanted
+                        ? 'Remote Control is on; it connects when the chat is running (click to switch off)'
+                        : 'Remote Control: continue this chat from claude.ai/code or the Claude mobile app'
+              }
+              onClick={() => chat?.sessionId && setRemote(chat.sessionId, !remoteWanted)}
+            >
+              <Smartphone size={16} />
+            </button>
+          )}
           <button className="icon-btn" title="Attach images (or paste / drop them)" onClick={() => fileInput.current?.click()}>
             <ImagePlus size={16} />
           </button>

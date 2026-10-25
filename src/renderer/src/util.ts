@@ -83,3 +83,13 @@ export function looksLikePath(s: string): boolean {
   if (!t || /[\s()=<>{},;'"`]/.test(t)) return false
   return t.startsWith('/') || t.startsWith('~/') || t.includes('/') || PATH_EXT_RE.test(t)
 }
+
+/** A chat cwd inside `<repo>/.claude/worktrees/<name>` belongs to the project at `<repo>`. */
+export function worktreeOf(cwd: string): { root: string; name: string } | null {
+  const m = cwd.match(/^(.*)\/\.claude\/worktrees\/([^/]+)$/)
+  return m && m[1] ? { root: m[1], name: m[2] } : null
+}
+
+export function projectRoot(cwd: string): string {
+  return worktreeOf(cwd)?.root ?? cwd
+}

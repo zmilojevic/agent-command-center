@@ -4,6 +4,11 @@ import App from './App'
 import { useStore } from './store'
 import { initTheme } from './theme'
 import './styles.css'
+import './styles/mentions-plan.css'
+import './styles/tasks.css'
+import './styles/mcp-worktree.css'
+import './styles/changes-open.css'
+import './styles/remote.css'
 
 // Apply the saved theme before the first paint so the window never flashes the wrong palette.
 initTheme()

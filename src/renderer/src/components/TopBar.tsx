@@ -1,10 +1,12 @@
-import { Minus, Square, X, GitBranch, Folder, FileDiff, MessageCircle } from 'lucide-react'
+import { Minus, Square, X, GitBranch, Folder, FileDiff, MessageCircle, FolderGit2, SquareTerminal } from 'lucide-react'
 import { useStore, isGeneral } from '../store'
-import { projectName, shortPath } from '../util'
+import { projectName, shortPath, worktreeOf } from '../util'
 import { useEffect, useState } from 'react'
 import ContextMeter from './ContextMeter'
 import UsageMeter from './UsageMeter'
 import SettingsPopover from './SettingsPopover'
+import McpPopover from './McpPopover'
+import { openFolderInEditor, openTerminalAt } from '../openIn'
 
 /** idle renders no dot (just the spacer); waiting-on-you, busy and finished-unseen do. */
 export type DotState = 'ask' | 'busy' | 'on' | 'idle'
@@ -30,6 +32,7 @@ export default function TopBar() {
 
   const chat = activeChatId ? chats[activeChatId] : undefined
   const general = useStore((s) => isGeneral(chat?.cwd))
+  const wt = chat ? worktreeOf(chat.cwd) : null
   const branch = chat?.sessionId ? sessions.find((s) => s.sessionId === chat.sessionId)?.gitBranch : undefined
 
   return (
@@ -47,14 +50,27 @@ export default function TopBar() {
       )}
       {chat && !general && (
         <div className="topbar-meta no-drag">
-          <span className="meta" title={shortPath(chat.cwd, home)}>
-            <Folder size={13} /> <span className="meta-text">{projectName(projectNames, chat.cwd)}</span>
+          <span className="meta openable" title={`${shortPath(chat.cwd, home)} (click to open in editor)`} onClick={() => void openFolderInEditor(chat.cwd)}>
+            <Folder size={13} /> <span className="meta-text">{projectName(projectNames, wt?.root ?? chat.cwd)}</span>
           </span>
+          {wt && (
+            <span className="meta" title={`Git worktree ${wt.name}`}>
+              <FolderGit2 size={13} /> <span className="meta-text">{wt.name}</span>
+            </span>
+          )}
+          <button className="icon-btn tiny" title="Open terminal here" onClick={() => void openTerminalAt(chat.cwd)}>
+            <SquareTerminal size={14} />
+          </button>
           {branch && branch !== 'HEAD' && (
             <span className="meta" title={branch}>
               <GitBranch size={13} /> <span className="meta-text">{branch}</span>
             </span>
           )}
+        </div>
+      )}
+      {chat && !general && (
+        <div className="no-drag">
+          <McpPopover chat={chat} />
         </div>
       )}
       {chat && !general && (

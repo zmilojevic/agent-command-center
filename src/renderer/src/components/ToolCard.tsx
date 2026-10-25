@@ -18,11 +18,13 @@ import {
   ChevronRight,
   ChevronDown,
   Sparkles,
+  ClipboardList,
 } from 'lucide-react'
 import type { ToolBlock, Subagent } from '../reduce'
 import { toolSummary } from '../reduce'
 import { useStore } from '../store'
 import { useNow } from '../hooks'
+import { activeProjectCwd, openFileInEditor } from '../openIn'
 import { fmtElapsed } from '../util'
 import Markdown from './Markdown'
 import type { PermissionRequest } from '@shared/types'
@@ -44,6 +46,8 @@ const ICONS: Record<string, typeof Terminal> = {
   TodoWrite: ListTodo,
   AskUserQuestion: MessageCircleQuestion,
   Skill: Sparkles,
+  ExitPlanMode: ClipboardList,
+  EnterPlanMode: ClipboardList,
 }
 
 const MAX = 6000
@@ -149,9 +153,11 @@ export default function ToolCard({ chatId, block, pending }: { chatId: string; b
   const isAgent = block.name === 'Agent' || block.name === 'Task'
   const agent = useStore((s) => (isAgent ? s.chats[chatId]?.subagents.find((a) => a.toolUseId === block.id) : undefined))
   const now = useNow(agent?.status === 'running')
+  const chatBusy = useStore((s) => s.chats[chatId]?.status === 'running')
   const Icon = ICONS[block.name] ?? Wrench
   const summary = toolSummary(block)
   const i = block.input as any
+  const openable = ['Read', 'Write', 'Edit', 'NotebookEdit'].includes(block.name) && !!summary && !!activeProjectCwd(chatId)
 
   const StatusIcon = block.status === 'done' ? Check : block.status === 'error' ? X : block.status === 'denied' ? Ban : null
 
@@ -192,6 +198,13 @@ export default function ToolCard({ chatId, block, pending }: { chatId: string; b
             ))}
           </ul>
         )
+      case 'ExitPlanMode':
+        return (
+          <>
+            <div className="agent-result"><Markdown text={clip(String(i.plan ?? ''))} /></div>
+            {block.result?.isError && <pre className="code out err">{clip(block.result.text)}</pre>}
+          </>
+        )
       case 'AskUserQuestion':
         return (
           <div className="qa-summary">
@@ -225,13 +238,48 @@ export default function ToolCard({ chatId, block, pending }: { chatId: string; b
     }
   }
 
+  if (block.name === 'EnterPlanMode') {
+    return (
+      <div className="tool plan-entered">
+        <Icon size={13} className="tool-icon" /> Entered plan mode
+      </div>
+    )
+  }
+
   return (
     <div className={`tool ${block.status} ${pending ? 'needs-permission' : ''}`}>
       <button className="tool-head" onClick={() => setOpen(!open)}>
         {open ? <ChevronDown size={13} className="chev" /> : <ChevronRight size={13} className="chev" />}
         <Icon size={14} className="tool-icon" />
-        <span className="tool-name">{block.name}</span>
-        <span className={`tool-summary ${['Read', 'Write', 'Edit', 'NotebookEdit', 'WebFetch'].includes(block.name) ? 'path' : ['Glob', 'Grep'].includes(block.name) ? 'pattern' : ''}`}>{summary}</span>
+        <span className="tool-name">{block.name === 'ExitPlanMode' ? 'Plan' : block.name}</span>
+        <span
+          className={`tool-summary ${['Read', 'Write', 'Edit', 'NotebookEdit', 'WebFetch'].includes(block.name) ? 'path' : ['Glob', 'Grep'].includes(block.name) ? 'pattern' : ''}${openable ? ' openable' : ''}`}
+          title={openable ? 'Open in editor' : undefined}
+          onClick={
+            openable
+              ? (e) => {
+                  e.stopPropagation()
+                  const line = block.name === 'Read' && Number(i.offset) > 0 ? Number(i.offset) : undefined
+                  void openFileInEditor(summary, activeProjectCwd(chatId) ?? '/', line)
+                }
+              : undefined
+          }
+        >
+          {summary}
+        </span>
+        {block.name === 'Bash' && block.status === 'running' && !pending && !i.run_in_background && chatBusy && (
+          <span
+            className="bg-btn"
+            role="button"
+            title="Keep it running in the background and continue (Ctrl+B)"
+            onClick={(e) => {
+              e.stopPropagation()
+              void window.desktop.backgroundTasks(chatId, block.id)
+            }}
+          >
+            Run in background
+          </span>
+        )}
         {agent && <span className="agent-live">{subagentLine(agent, now)}</span>}
         {(agent ? agent.status === 'running' : block.status === 'running') && !pending && <span className="spinner small" />}
         {StatusIcon && !(agent && agent.status === 'running') && <StatusIcon size={13} className="tool-status" />}

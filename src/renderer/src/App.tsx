@@ -46,6 +46,14 @@ export default function App() {
       .then(restoreTabs)
   }, [loadSessions, restoreTabs])
 
+  useEffect(
+    () =>
+      window.desktop.onTrayNewChat(() => {
+        void newGeneralChat().then(() => requestAnimationFrame(() => focusComposer()))
+      }),
+    [newGeneralChat],
+  )
+
   useEffect(() => {
     // Shared guard for chat-level global hotkeys (Ctrl/Alt+W, Alt+Delete): returns the active chat when the
     // key may fire (no overlay open; inside a text field only for the empty composer), else undefined.
@@ -64,6 +72,9 @@ export default function App() {
       if (mod && e.key.toLowerCase() === 'n') {
         e.preventDefault()
         void newGeneralChat()
+      } else if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'q') {
+        e.preventDefault()
+        window.desktop.window('quit')
       } else if (mod && e.shiftKey && e.key.toLowerCase() === 'i') {
         e.preventDefault()
         window.desktop.window('devtools')

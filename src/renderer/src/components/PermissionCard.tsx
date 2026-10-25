@@ -5,6 +5,7 @@ import type { PermissionRequest } from '@shared/types'
 import { useStore } from '../store'
 import DiffView from './DiffView'
 import QuestionCard from './QuestionCard'
+import PlanCard from './PlanCard'
 
 const VERBS: Record<string, string> = {
   Bash: 'run a command',
@@ -25,6 +26,7 @@ export default function PermissionCard({ request }: { request: PermissionRequest
   const i = request.input as any
 
   if (request.toolName === 'AskUserQuestion') return <QuestionCard request={request} />
+  if (request.toolName === 'ExitPlanMode') return <PlanCard request={request} />
 
   const allow = (remember: boolean): void => {
     void respond(request.chatId, request.requestId, { behavior: 'allow', remember })

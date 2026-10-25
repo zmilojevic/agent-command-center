@@ -1,0 +1,125 @@
+/* ---- changes actions (stage / discard / commit) and open-in-editor ------------------------------ */
+.cp-staged {
+  color: var(--muted);
+  font-size: 12px;
+}
+.cp-commit-dd .dd-trigger {
+  border: 1px solid var(--border-2);
+  border-radius: 999px;
+  padding: 3px 8px 3px 10px;
+  font-size: 12px;
+}
+.cp-commit-dd .dd-menu {
+  left: auto;
+  right: 0;
+  min-width: 180px;
+}
+.cp-action-error {
+  margin: 6px 10px 0;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--err) 8%, transparent);
+  color: color-mix(in srgb, var(--err) 70%, var(--text-2));
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+.cp-action-error span {
+  flex: 1;
+}
+
+.cp-file-head {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border-radius: 8px;
+}
+.cp-file-head:hover,
+.cp-file-head:has(.cp-file-row.open) {
+  background: var(--surface-2);
+}
+.cp-file-head .cp-file-row {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+  background: transparent;
+}
+.cp-check {
+  flex-shrink: 0;
+  width: 15px;
+  height: 15px;
+  margin-left: 8px;
+  margin-right: 2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-2);
+  border-radius: 4px;
+  color: var(--text-2);
+  background: transparent;
+}
+.cp-check:hover {
+  border-color: var(--accent-muted);
+}
+.cp-check.on,
+.cp-check.partial {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  border-color: var(--accent-muted);
+}
+.cp-file-actions {
+  display: none;
+  flex-shrink: 0;
+  align-items: center;
+  padding-right: 4px;
+}
+.cp-file-head:hover .cp-file-actions {
+  display: inline-flex;
+}
+.ud-hunk-row {
+  display: flex;
+  align-items: center;
+  background: color-mix(in srgb, var(--muted) 10%, transparent);
+}
+.ud-hunk-row .ud-hunk {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+}
+.ud-hunk-discard {
+  display: none;
+  flex-shrink: 0;
+  margin-right: 6px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--muted);
+  border: 1px solid var(--border-2);
+}
+.ud-hunk-row:hover .ud-hunk-discard {
+  display: inline-block;
+}
+.ud-hunk-discard:hover {
+  color: var(--text);
+}
+
+/* clickable file paths */
+.tool-summary.openable:hover,
+.md code.inline.path.openable:hover {
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 45%, transparent);
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.md code.inline.path.openable {
+  cursor: pointer;
+}
+.meta.openable {
+  cursor: pointer;
+}
+.meta.openable:hover .meta-text {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}

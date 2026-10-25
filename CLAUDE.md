@@ -56,14 +56,44 @@ the same day. It replaced the idea of tweaking the GTK `claude-session-manager` 
   changes panel/git refresh, the composer hides the permission dropdown, `@` agents and the eraser, ChatView shows a "How can I help
   you today?" greeting (centred with the composer via `.chat-pane.fresh` until the first message) and no per-turn stats, the TopBar shows a
   "Chat" label instead of folder/branch. The `WebSearch` ToolCard body renders its `Links: [{title,url}]` JSON as a source list.
+- Worktree chats: `git.ts` `createWorktree(cwd, name)` (`git:worktreeAdd`) makes `<main repo root>/.claude/worktrees/<name>` on branch `worktree-<name>` from HEAD (same as Claude Code's `--worktree`; root = parent of `--git-common-dir`, so it also works from inside a worktree) and appends `.claude/worktrees/` once to `.git/info/exclude` (never `.gitignore`); `removeWorktree(path, force)` (`git:worktreeRemove`) keeps the branch. A worktree chat is an ordinary session whose cwd is the worktree path; the renderer identifies it with `worktreeOf(cwd)` / `projectRoot(cwd)` (`util.ts`). Sidebar groups sessions by `projectRoot`, so they sit under their project; rows show a small `wt-chip` with the worktree name; project menu "New chat in worktree…" (name dialog prefilled `wt-xxxx`, error shown inline), row menu "Remove worktree…" (worktree rows only: closes the chat, force-removes the folder, keeps branch and transcripts). "Remove project…" deletes the transcripts of its worktree cwds too (one `deleteProject` per cwd). TopBar shows the root's project name plus a worktree label. Styles for MCP/worktree UI live in `styles/mcp-worktree.css`.
+- `src/main/remote.ts` – Remote Control (continue a project chat from claude.ai/code or the Claude mobile app). `RemoteManager`
+  (`remote:enable(chatId, {sessionId,title,cwd,model,branch})` / `remote:disable`, event `remote:state {chatId,state:'off'|'connecting'|'on'|'error',error?,url?}`)
+  keeps one `RemoteBridge` per chat. It uses the SDK's alpha `@anthropic-ai/claude-agent-sdk/bridge`: `createCodeSession` (title, cwd, model; no git
+  context) -> `fetchRemoteCredentials` -> `attachBridgeSession`. The `cse_*` id per session id is persisted in `<userData>/remote-sessions.json`, so
+  re-enabling / restarting re-attaches the same claude.ai session (URL `https://claude.ai/code/session_<id>`, same id with `cse_` -> `session_`). The
+  bridge hangs off the runner through the small `RemoteHooks` tap in `agent.ts` (`runner.remote`: every forwarded SDKMessage, local sends,
+  permission request/done, close). Outbound: assistant/user/system init+compact_boundary messages are `write()`n (no `stream_event` partials), `result`
+  -> `sendResult()` + `reportState('idle')`, a turn start -> `running`, a pending permission -> `sendControlRequest(can_use_tool)` + `requires_action`
+  (cancel via `sendControlCancelRequest` when answered/cancelled locally). Inbound: user message -> `runner.send` + `chat:remoteMessage` (renderer shows the
+  bubble via the shared `appendUserMessage`), `control_response` -> `runner.respond` + `permission:cancel`, interrupt, set model / permission mode
+  (`remote:setting` event updates the Dropdowns), rename -> `renameSession` + `sessions:changed`. JWT is refreshed proactively (3 h at most; each
+  fetch bumps the epoch) and on close codes 401 / 4090 / 4094 via `reconnectTransport`; other close codes -> error state. Renderer: pref `remoteSessions`
+  (session ids, like `keepWarm`), `remote` state per chat, restored in `startRunner`; Smartphone button in the composer toolbar (project chats only),
+  row context menu "Remote control", Smartphone badge in the row's chip line. Not carried over by `/clear` (new session id). The runner closing closes the bridge.
+  Token handling: the OAuth access token is read fresh from `~/.claude/.credentials.json` (`claudeAiOauth.accessToken`, checked against `expiresAt`) for
+  each bridge HTTP call only; it is never logged, written or sent to the renderer. Expired -> error "Claude login token expired – send a message in any
+  chat to refresh it" (the CLI refreshes it on its next API call). Base URL is hardcoded `https://api.anthropic.com` (the CLI's default).
 - `src/main/sessionMeta.ts` – reads the tail (512 KB) of a transcript `~/.claude/projects/<cwd with
   non-alphanumerics → '-'>/<id>.jsonl` and derives model, effort, context tokens
   (input + cache_read + cache_creation of the last assistant line), last timestamp, and the cache TTL from the
   most recent turn that *wrote* cache entries (`cache_creation.ephemeral_1h_input_tokens` → 1 h, else 5 m;
   default 1 h). Cached by mtime.
+- `src/main/tray.ts` – tray icon (`resources/icon.png` at 32 px, StatusNotifierItem) with menu Show/hide, New chat (`tray:newChat` →
+  renderer `newGeneralChat()` + composer focus), Quit. Left click = `toggleWindow`: no window → create; hidden/minimized → show+focus;
+  visible on Hyprland (`HYPRLAND_INSTANCE_SIGNATURE`) → `hyprctl clients -j` (pid === process.pid) vs `hyprctl activeworkspace -j`:
+  same workspace → hide to tray, other workspace → focus (Lua `hyprctl dispatch 'hl.dsp.focus({window=...})'` must print `ok`,
+  fallback `focuswindow pid:<pid>`); no hyprctl/window not found or non-Hyprland → `isFocused()` ? hide : show+focus. All hyprctl calls
+  use execFile arg arrays, 1.5 s timeout. `focusWindow()` is also used by notification clicks and `second-instance`. Decision is logged
+  as `tray: action=… ws=… active=…`; `CCD_TRAY_DRY_RUN=1` logs it without hiding/showing/focusing. Closing the window (also the
+  renderer's close button) hides to tray unless quitting (`before-quit`, tray Quit, `window:action 'quit'`); `window-all-closed` does
+  not quit while the tray exists (no tray host → old behaviour, close quits). Runners keep running while hidden. Single instance via
+  `requestSingleInstanceLock()` (per user-data-dir; skipped when `ELECTRON_RENDERER_URL` is set, i.e. `pnpm dev`).
 - `src/main/git.ts` – `gitChanges(cwd)` (`git:changes`): uncommitted changes of the repo containing cwd = `git diff HEAD`
   (empty tree when there are no commits) split per file + untracked files via `git diff --no-index /dev/null`
   (≤ 200, > 1 MB shown as binary), diff text capped at 4 MB (`truncated`). Never through a shell.
+- `src/main/git.ts` also has the panel actions (all return an error string or null, never through a shell): `gitSetStaged` (`add` / `restore --staged`, `rm --cached` before the first commit), `gitDiscardFile` (M/D `restore --source=HEAD --staged --worktree`, A `rm -f`, untracked `fs.rm` inside the repo root only, R restores oldPath + `rm -f` new), `gitDiscardHunk` (`apply -R --recount` of one hunk's patch on stdin, worktree only). `gitChanges` fills `ChangedFile.staged` (`all|partial|none`).
+- `src/main/launch.ts` – detects editors (subl, code, zed, cursor, idea, codium) and terminals (kitty, alacritty, foot, ghostty, wezterm, konsole, gnome-terminal) by scanning PATH plus `~/.local/bin`, `/usr/bin`; `app:tools`, `app:openInEditor(path, line?, editorId?)` (absolute paths only; falls back to `shell.openPath` when none/`system`), `app:openTerminal(dir, terminalId?)`. Spawned detached, stdio ignored, no shell. Renderer helpers in `src/renderer/src/openIn.ts`; prefs `editor` / `terminal` (ids, '' = first detected) with Dropdowns in the gear menu.
 - `src/main/usage.ts` – `UsageService`: plan rate limits via the SDK's
   `usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({skipBehaviors:true})` on any live runner, else on a
   temporary idle `query()` (cwd home, `persistSession:false`; ~0.5 s, no tokens, no transcript). Normalizes the
@@ -74,7 +104,7 @@ the same day. It replaced the idea of tweaking the GTK `claude-session-manager` 
   streaming; `finalized` index maps frames to streamed blocks), user tool_result frames, result, system
   init/status/compact_boundary/permission_denied, task/subagent messages, stored transcripts
   (`applyTranscript`, merges consecutive assistant lines with the same message id). Hides user text starting
-  with `<command-name>`, `<system-reminder>`, `<local-command-stdout>`… Local slash-command output renders
+  with `<command-name>`, `<system-reminder>`, `<local-command-stdout>`… Non-subagent tasks (`task_type` other than `local_agent`) go to `ChatModel.tasks` (`BgTask`) from task_started/updated/notification and `background_tasks_changed` (replace semantics: unknown live ids are added, tracked backgrounded ones that vanished are marked completed; it arrives *before* task_started). Local slash-command output renders
   as a muted block; the post-`/compact` summary as a collapsed card.
 - `src/renderer/src/store.ts` – zustand + immer. Sessions list, `meta` per session, open chats keyed by
   chatId (sessionId inside), `tabs` (internal order only, no UI strip), pending permissions, drafts,
@@ -88,8 +118,8 @@ the same day. It replaced the idea of tweaking the GTK `claude-session-manager` 
   keeps its slot and looks cleared in place (chains work). Both prefs are pruned in `loadSessions` against disk.
 - `src/renderer/src/components/` – `UsageMeter` (top bar, left: "5h N% · time to reset", hover = all session/weekly rows), `Sidebar` (projects, rows, drag-reorder, context menus, subagent list,
   time-window Dropdown in the header, Add project footer), `TopBar` (folder/branch, `ContextMeter`,
-  `SettingsPopover` (theme Dropdown + notifications switch), window controls; exports `dotState`), `ChatView`, `FindBar`, `MessageItem`,
-  `ToolCard`, `DiffView`, `ChangesPanel` + `UnifiedDiff` (right-hand git changes panel with line comments), `PermissionCard`, `QuestionCard`, `Markdown` (react-markdown + gfm +
+  `SettingsPopover` (theme Dropdown + notifications switch), `McpPopover` (plug button, project chats only: `mcpServerStatus()` rows with status dot, scope chip, expandable tool list, enable switch via `toggleMcpServer`, reconnect via `reconnectMcpServer`; IPC `chat:mcpStatus/mcpToggle/mcpReconnect`, trimmed `McpServerInfo` without config/headers; refreshes on open, after actions and on chat status changes), window controls; exports `dotState`), `ChatView`, `FindBar`, `MessageItem`,
+  `ToolCard` (running Bash gets a "Run in background" button), `TasksStrip` (pills above the composer for background shells/monitors/workflows, click = output popover with Stop / Copy), `DiffView`, `ChangesPanel` + `UnifiedDiff` (right-hand git changes panel with line comments), `PermissionCard`, `QuestionCard`, `Markdown` (react-markdown + gfm +
   rehype-highlight), `Composer` (slash picker, attachments, queue, model/effort/mode Dropdowns, eraser = `/clear`),
   `NewSessionDialog`, `Welcome`, `Dropdown` (custom; **never use native `<select>`**), `ErrorBoundary`,
   `ImageThumb`.
@@ -104,6 +134,12 @@ the same day. It replaced the idea of tweaking the GTK `claude-session-manager` 
 
 ## SDK facts learned the hard way
 
+- Remote Control: the CLI's `--remote-control` / `/remote-control` only exist in the interactive REPL (passing it via `extraArgs` in SDK mode is
+  silently ignored), but hosts can do it themselves with `@anthropic-ai/claude-agent-sdk/bridge` (alpha; see its `bridge.d.ts`). Verified with a
+  prototype using only the OAuth token from `~/.claude/.credentials.json` and no trusted-device token: `createCodeSession` returns a `cse_*` id,
+  `fetchRemoteCredentials` returns `{worker_jwt, api_base_url: https://api.anthropic.com, expires_in: 46800 (13 h), worker_epoch: 1}`, `attachBridgeSession`
+  connects (`isConnected()` turns true after the first flush), writes/`sendResult`/`reportState` succeed. A possible `untrusted_device` failure (server flag
+  `sessions_elevated_auth_enforcement`) is surfaced verbatim in the UI; not worked around.
 - `listSessions()` with no `dir` spans all projects (fast, ~30 ms for 450 sessions); `getSessionMessages`
   needs `dir: cwd`. Sessions without a cwd are filtered out.
 - In streaming-input mode the `system init` message only arrives at the start of the first turn, so a resumed
@@ -116,8 +152,15 @@ the same day. It replaced the idea of tweaking the GTK `claude-session-manager` 
 - Transcript assistant lines carry `effort`, `perTurnEffort`, `requestedModel`, `gitBranch`, `timestamp`,
   `message.usage`.
 - `askSideQuestion` side questions keep the main prompt cache warm (verified: after 9 min with a 5 m TTL the warmed session read the full 21.6k prefix from cache, the control rewrote ~15k). They emit only `control_request_progress` / `rate_limit_event` stream events (ignored by the reducer) and no transcript lines.
+- Background tasks: `system/task_started|task_updated|task_notification|background_tasks_changed` carry `task_type` (`local_bash`, `local_agent`, `local_workflow`, `monitor_mcp`, ...). Verified shapes: `task_updated.patch.status` = `killed` after `stopTask`, then `task_notification` `status:'stopped'` with `output_file`, then `background_tasks_changed` with an empty list. `q.getTaskOutput(taskId)` (undocumented, not in the types) returns `{output, total_bytes, truncated}` (last <= 8 KiB, ANSI possible); `stopTask` resolves undefined; `backgroundTasks(toolUseId?)` moves foreground tasks to the background. IPC `chat:taskOutput|stopTask|backgroundTasks`.
 - Slash commands typed by the user go to the CLI unchanged as the user message; `/cost` → `/usage` alias etc.
   Their output is not stored in the transcript.
+- The CLI expands `@path` file mentions (and `@"path with spaces"`) in headless user messages itself, so the composer only inserts text.
+  Its file index is reachable via the undocumented control request `(query as any).request({subtype:'file_suggestions', query})` →
+  `response.suggestions[{path}]` (folders end with '/', empty query = top-level entries, some hits are absolute paths; the first calls after
+  startup return [] while the index builds, ~0.5 s). Wrapped as `ChatRunner.fileSuggestions` (`chat:files`).
+- In plan mode `canUseTool` is called for `ExitPlanMode` (input `{plan}`); an allow result with `updatedPermissions:[{type:'setMode',mode,destination:'session'}]`
+  switches the session mode (`PermissionResponse` allow `mode`).
 
 ## UI conventions the user has asked for
 
@@ -156,17 +199,18 @@ the same day. It replaced the idea of tweaking the GTK `claude-session-manager` 
   navigation; rows are compact (title + time, no chips); its menu only offers New chat. Footer: full-width "New chat" (`Ctrl N`, focuses the
   composer) above "Add project". Welcome's primary button is "New chat" (general), with a plain "New project session…" button opening the dialog.
 - Composer: Enter sends, Shift+Enter newline, Esc while working stops the turn (same as the Stop button; an open picker closes first), Up/Down in an empty composer recall earlier prompts of that chat, `/` opens the command picker, eraser button (also Alt+Delete) = `/clear`,
-  messages typed while busy are queued. `@` opens the agent picker (from `supportedAgents()`, `chat:agents`), inserts `@agent-<name>` which the CLI routes to that subagent; mentions render as a muted pill.
+  messages typed while busy are queued. `@` opens the agent picker (from `supportedAgents()`, `chat:agents`), inserts `@agent-<name>` which the CLI routes to that subagent; mentions render as a muted pill. The same `@` token also lists files (project chats only; regex accepts path characters and the `@"quoted` form): agents first, then up to 12 files from `chat:files` (debounced 80 ms, stale answers dropped by sequence number, one retry after 600 ms on an empty answer, index warmed once per runner generation). Picking a file inserts `@path ` (quoted if it has whitespace); a folder inserts `@dir/` and keeps the picker open. `@path` tokens in sent user messages render as the same pill (`Markdown files` prop). Shift+Tab in the composer (project chats, no picker open) toggles plan mode, remembering the previous mode (default bypass). `ExitPlanMode` permission requests render as `PlanCard` (plan Markdown, approve as accept edits / bypass / ask before edits = allow + `mode`, Ctrl+Enter = accept edits, "Keep planning" = deny with feedback); in the transcript `ExitPlanMode` is a collapsed "Plan" card and `EnterPlanMode` a muted one-liner. New CSS for these lives in `src/renderer/src/styles/mentions-plan.css`.
 - Changes panel (Ctrl+Shift+G or the `+A −D` button left of the context meter): uncommitted changes of the active
   chat's repo, refreshed on chat activation, after every `result`, on open and via its refresh button. Click a diff
   line (or its hover button) to add a comment; "Send to Claude" sends all of the chat's comments as one numbered
   message (queued while busy). Comments live on the chat, unpersisted; lines that vanish after a refresh list under
   "Outdated". Width is draggable on its left edge (`changesWidth` pref, double-click = 520), capped at 60 % of the row.
+- Changes panel actions: per-file stage checkbox (muted, partial = minus) and "N staged" in the header; hover on a file header = Open in editor, "Discard changes…"; hover on a hunk header = "Discard hunk…" (not for untracked/binary); both confirm in a modal (Enter confirms, Esc cancels); errors show inline above the list. Header "Commit…" Dropdown (Commit / Commit and push) sends Claude a short commit request (queued while busy). Open-in-editor entry points: ToolCard path of Read/Write/Edit/NotebookEdit (Read at `offset`), inline-code paths in project chats (click; `path:line[:col]`, relative to the chat's folder), TopBar folder name (editor) and terminal icon, sidebar project menu (Open in editor / Open in terminal / Open folder).
 - Dots also have a steady blue `ask` state (`--ask`) when a chat has a pending permission/question; it beats busy.
   Context meter bar is segmented by category (muted per-category hues on `--chip-l`); popover adds the last
   turn's input / cache read / cache write / output and cache-hit %.
 - Keep cache warm (per chat, by session id): flame button in the composer toolbar and "Keep cache warm" in the row context menu (turning it on for a closed chat opens it in the background); the cache pill gets a small flame while active. The composer flame turns into a muted blue snowflake (`.icon-btn.cold`, `--ask`) once the cache is cold (also on the sidebar pill when keep-warm is on). `tickKeepWarm` (every 30 s) warms at TTL − min(5 m, 20 % of TTL), only while the chat is idle with nothing pending, never re-warms a cold cache, gives up after 12 h without a real turn (`KEEP_WARM_MAX_IDLE_MS`), pauses while the chat is closed; failures retry after 2 min. Cache time left everywhere = `max(lastAt, warmedAt)`; `/clear` carries the flag to the new session id.
-- Keyboard: Ctrl+N new general chat (project sessions: sidebar project button / "New project session…" on Welcome), Ctrl+Shift+G changes panel, Ctrl+Tab / Ctrl+Shift+Tab open the next/previous visible sidebar row on every press (no need to release Ctrl), Ctrl+W / Alt+W delete the active chat's transcript (closes it if it has none; inside a text field only when it's the empty composer), Alt+Delete = `/clear` (same text-field rule), Ctrl+F find, Ctrl+R reload,
+- Keyboard: Ctrl+N new general chat (project sessions: sidebar project button / "New project session…" on Welcome), Ctrl+Shift+G changes panel, Ctrl+Tab / Ctrl+Shift+Tab open the next/previous visible sidebar row on every press (no need to release Ctrl), Ctrl+W / Alt+W delete the active chat's transcript (closes it if it has none; inside a text field only when it's the empty composer), Alt+Delete = `/clear` (same text-field rule), Ctrl+B in the composer while a turn runs = move foreground tasks to the background (`backgroundTasks`), Ctrl+F find, Ctrl+Q really quit (closing the window only hides it to the tray), Ctrl+R reload,
   Ctrl+Shift+I DevTools, Esc closes dialogs/pickers/find.
 
 ## Testing without disturbing the user (Hyprland)
@@ -174,13 +218,14 @@ the same day. It replaced the idea of tweaking the GTK `claude-session-manager` 
 - The user usually has the app running (and sometimes a fullscreen game on the focused monitor). **Never
   `pkill -x electron` or run `scripts/dev-launch.sh` while their instance is up** (both kill every electron).
   Check first: `hyprctl clients -j | jq '.[] | select(.class=="agent-command-center")'`.
-- Start an isolated copy instead: `electron . --remote-debugging-port=9334 --user-data-dir=<scratch>/profile`
-  (own localStorage), connect with puppeteer-core (`protocolTimeout: 180000`), set `document.title` to a
-  unique string, then move it to the terminal's workspace without focusing:
-  `hyprctl dispatch 'hl.dsp.window.move({ workspace = 7, window = (function() for _,w in ipairs(hl.get_windows()) do if w.title == "CCD-TEST" then return w end end end)(), silent = true })'`.
-  Hyprland runs a Lua config: classic dispatcher syntax prints an error on stdout and exits 0, so check for
-  `ok`. Never `hl.dsp.focus`. Kill only that pid afterwards. Screenshots via `page.screenshot()` (slow when
-  the window is hidden, but works); never `grim` the screen.
+- Start an isolated copy with `scripts/test-launch.sh [port] [profile-dir]` (defaults 9334, `/tmp/ccd-test/profile`;
+  own localStorage). It registers a Hyprland window rule so the test window opens silently on the main window's
+  workspace with no initial focus (the user's explicit wish), launches electron with `CCD_WINDOW_TITLE=CCD-TEST`
+  (main uses it as the window title, ignores `<title>` changes, `showInactive()`), and prints the electron pid, the
+  workspaces and the focused window. Never move or focus windows; no need to set `document.title`. Connect with
+  puppeteer-core (`protocolTimeout: 180000`); `page.click()` can hang on such a hidden window, so click via
+  `page.evaluate(() => el.click())`. Kill only the printed pid afterwards. Screenshots via `page.screenshot()`
+  (slow when the window is hidden, but works); never `grim` the screen.
 - To inspect the user's live instance without restarting it: `kill -USR1 <main pid>` opens the Node inspector
   on 127.0.0.1:9229; evaluate with `process.getBuiltinModule('node:module').createRequire(<repo>/package.json)`
   → `require('electron').BrowserWindow.getAllWindows()[0].webContents.executeJavaScript(...)` (dynamic
@@ -192,7 +237,7 @@ the same day. It replaced the idea of tweaking the GTK `claude-session-manager` 
 
 - Linux only, no packaged build (`pnpm package` → unpacked dir).
 - Subagents tracked only for chats opened in the app, not reconstructed from old transcripts.
-- No `@` file mentions (`@` is agents only), no rewind, no plan-mode cards, no tray icon
+- No rewind
   (candidate next features, in roughly that order of value).
 - Notification click → focus+activate chat is wired but was never exercised by a script.
 - "Always allow" and "Delete transcript" paths were never run end to end in tests (destructive).

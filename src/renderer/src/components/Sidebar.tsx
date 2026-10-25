@@ -1,9 +1,10 @@
 import type React from 'react'
 import { Fragment, useMemo, useRef, useState, useEffect } from 'react'
-import { Plus, Search, Clock, FolderGit2, FolderPlus, ChevronRight, ChevronDown, Pencil, Trash2, GitFork, FolderOpen, Pin, PinOff, MessageSquarePlus, ChevronsDownUp, ChevronsUpDown, XCircle, FolderX, Flame, Snowflake, Check, MessageCircle } from 'lucide-react'
-import { useStore, KEEP_WARM_MAX_IDLE_MS } from '../store'
+import { Plus, Search, Clock, FolderGit2, FolderPlus, ChevronRight, ChevronDown, Pencil, Trash2, GitFork, FolderOpen, Pin, PinOff, MessageSquarePlus, ChevronsDownUp, ChevronsUpDown, XCircle, FolderX, Flame, Snowflake, Check, MessageCircle, GitBranchPlus, Code, SquareTerminal, Smartphone } from 'lucide-react'
+import { openFolderInEditor, openTerminalAt } from '../openIn'
+import { useStore, KEEP_WARM_MAX_IDLE_MS, isGeneral } from '../store'
 import type { SessionSummary } from '@shared/types'
-import { projectName, relativeTime, shortPath, modelLabel, defaultContextWindow, fmtTokens, fmtElapsed } from '../util'
+import { projectName, projectRoot, worktreeOf, relativeTime, shortPath, modelLabel, defaultContextWindow, fmtTokens, fmtElapsed } from '../util'
 import type { Subagent } from '../reduce'
 import { useNow } from '../hooks'
 import { subagentLine } from './ToolCard'
@@ -74,6 +75,9 @@ export default function Sidebar() {
   const keepWarm = useStore((s) => s.keepWarm)
   const warmedAt = useStore((s) => s.warmedAt)
   const setKeepWarm = useStore((s) => s.setKeepWarm)
+  const remoteSessions = useStore((s) => s.remoteSessions)
+  const remoteStates = useStore((s) => s.remote)
+  const setRemote = useStore((s) => s.setRemote)
   const modelMax = useStore((s) => s.modelMax)
   const loadMeta = useStore((s) => s.loadMeta)
   const [now, setNow] = useState(Date.now())
@@ -85,6 +89,9 @@ export default function Sidebar() {
   const deleteSession = useStore((s) => s.deleteSession)
   const removeProject = useStore((s) => s.removeProject)
   const [removing, setRemoving] = useState<{ g: Group; count: number } | null>(null)
+  // ---- worktrees
+  const [wtNew, setWtNew] = useState<{ cwd: string; name: string; error?: string; busy?: boolean } | null>(null)
+  const [wtRemove, setWtRemove] = useState<{ chatId?: string; path: string; name: string; error?: string; busy?: boolean } | null>(null)
   const [collapsed, setCollapsedState] = useState<Record<string, boolean>>(() => {
     try {
       return JSON.parse(localStorage.getItem('collapsedProjects') ?? '{}')
@@ -136,10 +143,11 @@ export default function Sidebar() {
         const hay = `${s.customTitle ?? ''} ${s.summary ?? ''} ${s.firstPrompt ?? ''} ${s.cwd === generalDir ? '' : `${s.cwd} ${projectNames[s.cwd] ?? ''}`} ${s.sessionId}`.toLowerCase()
         if (!hay.includes(q)) continue
       }
-      let g = s.cwd === generalDir ? general : byCwd.get(s.cwd)
+      const root = projectRoot(s.cwd)
+      let g = s.cwd === generalDir ? general : byCwd.get(root)
       if (!g) {
-        g = { cwd: s.cwd, name: projectName(projectNames, s.cwd), sessions: [], latest: 0, pinned: false }
-        byCwd.set(s.cwd, g)
+        g = { cwd: root, name: projectName(projectNames, root), sessions: [], latest: 0, pinned: false }
+        byCwd.set(root, g)
       }
       g.sessions.push(s)
       g.latest = Math.max(g.latest, s.lastModified)
@@ -150,10 +158,11 @@ export default function Sidebar() {
       if (!c.sessionId || c.closed || known.has(c.sessionId) || hidden.has(c.sessionId)) continue
       if (q && !`${c.title} ${c.cwd === generalDir ? '' : `${c.cwd} ${projectNames[c.cwd] ?? ''}`} ${c.sessionId}`.toLowerCase().includes(q)) continue
       const s: SessionSummary = { sessionId: c.sessionId, summary: c.title, lastModified: c.createdAt ?? 0, createdAt: c.createdAt, cwd: c.cwd }
-      let g = c.cwd === generalDir ? general : byCwd.get(c.cwd)
+      const root = projectRoot(c.cwd)
+      let g = c.cwd === generalDir ? general : byCwd.get(root)
       if (!g) {
-        g = { cwd: c.cwd, name: projectName(projectNames, c.cwd), sessions: [], latest: 0, pinned: false }
-        byCwd.set(c.cwd, g)
+        g = { cwd: root, name: projectName(projectNames, root), sessions: [], latest: 0, pinned: false }
+        byCwd.set(root, g)
       }
       g.sessions.push(s)
       g.latest = Math.max(g.latest, s.lastModified)
@@ -295,9 +304,30 @@ export default function Sidebar() {
   }
   // Counts every transcript of the folder, not just those inside the time window.
   const onRemoveProject = (g: Group): void => {
-    const count = sessions.filter((x) => x.cwd === g.cwd).length
+    const count = sessions.filter((x) => x.cwd && projectRoot(x.cwd) === g.cwd).length
     if (count === 0) void removeProject(g.cwd)
     else setRemoving({ g, count })
+  }
+  const commitWtNew = async (): Promise<void> => {
+    if (!wtNew || wtNew.busy) return
+    const name = wtNew.name.trim()
+    setWtNew({ ...wtNew, name, busy: true, error: undefined })
+    const res = await window.desktop.worktreeAdd(wtNew.cwd, name)
+    if ('error' in res) {
+      setWtNew({ ...wtNew, name, error: res.error })
+      return
+    }
+    setWtNew(null)
+    quickChat(res.path)
+    requestAnimationFrame(() => focusComposer())
+  }
+  const commitWtRemove = async (): Promise<void> => {
+    if (!wtRemove || wtRemove.busy) return
+    setWtRemove({ ...wtRemove, busy: true, error: undefined })
+    if (wtRemove.chatId) closeTab(wtRemove.chatId)
+    const res = await window.desktop.worktreeRemove(wtRemove.path, true)
+    if (res.error) setWtRemove({ ...wtRemove, error: res.error })
+    else setWtRemove(null)
   }
   const commitRemove = async (): Promise<void> => {
     if (!removing) return
@@ -648,6 +678,7 @@ export default function Sidebar() {
                         now={now}
                         compact={g.general}
                         keepWarm={keepWarm.includes(s.sessionId)}
+                        remote={remoteSessions.includes(s.sessionId) ? (chat ? (remoteStates[chat.chatId]?.state ?? 'connecting') : 'on') : undefined}
                         warmedAt={warmedAt[s.sessionId]}
                         onOpen={() => void openSession(s).then(() => requestAnimationFrame(() => focusComposer()))}
                         onMenu={(e) => {
@@ -699,6 +730,19 @@ export default function Sidebar() {
               {keepWarm.includes(menu.s.sessionId) && <Check size={14} style={{ marginLeft: 'auto' }} />}
             </button>
           )}
+          {!isGeneral(menu.s.cwd) && (onDisk.has(menu.s.sessionId) || openBySession[menu.s.sessionId]) && (
+            <button
+              onClick={() => {
+                const on = !remoteSessions.includes(menu.s.sessionId)
+                setRemote(menu.s.sessionId, on)
+                if (on && !openBySession[menu.s.sessionId]) void openSession(menu.s, false, true)
+                setMenu(null)
+              }}
+            >
+              <Smartphone size={14} /> Remote control
+              {remoteSessions.includes(menu.s.sessionId) && <Check size={14} style={{ marginLeft: 'auto' }} />}
+            </button>
+          )}
           {onDisk.has(menu.s.sessionId) && (
             <button onClick={() => void openSession(menu.s, true).then(() => {
               setMenu(null)
@@ -715,6 +759,16 @@ export default function Sidebar() {
           {menu.s.cwd !== generalDir && (
             <button onClick={() => void window.desktop.openPath(menu.s.cwd!).then(() => setMenu(null))}>
               <FolderGit2 size={14} /> Open project folder
+            </button>
+          )}
+          {menu.s.cwd && worktreeOf(menu.s.cwd) && (
+            <button
+              onClick={() => {
+                setWtRemove({ chatId: openBySession[menu.s.sessionId], path: menu.s.cwd!, name: worktreeOf(menu.s.cwd!)!.name })
+                setMenu(null)
+              }}
+            >
+              <FolderX size={14} /> Remove worktree…
             </button>
           )}
           {onDisk.has(menu.s.sessionId) && (
@@ -756,8 +810,17 @@ export default function Sidebar() {
           <button onClick={() => { setShowNewDialog(true, groupMenu.g.cwd); setGroupMenu(null) }}>
             <Plus size={14} /> New chat here with options…
           </button>
+          <button onClick={() => { setWtNew({ cwd: groupMenu.g.cwd, name: `wt-${Math.random().toString(16).slice(2, 6)}` }); setGroupMenu(null) }}>
+            <GitBranchPlus size={14} /> New chat in worktree…
+          </button>
           <button onClick={() => void window.desktop.openPath(groupMenu.g.cwd).then(() => setGroupMenu(null))}>
             <FolderOpen size={14} /> Open folder
+          </button>
+          <button onClick={() => { void openFolderInEditor(groupMenu.g.cwd); setGroupMenu(null) }}>
+            <Code size={14} /> Open in editor
+          </button>
+          <button onClick={() => { void openTerminalAt(groupMenu.g.cwd); setGroupMenu(null) }}>
+            <SquareTerminal size={14} /> Open in terminal
           </button>
           <button onClick={() => { setRenamingProject({ cwd: groupMenu.g.cwd, name: groupMenu.g.name }); setGroupMenu(null) }}>
             <Pencil size={14} /> Rename project…
@@ -797,6 +860,62 @@ export default function Sidebar() {
               </button>
               <button className="btn danger" onClick={() => void commitRemove()}>
                 Remove project
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {wtNew && (
+        <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && setWtNew(null)}>
+          <div className="modal rename-modal">
+            <div className="modal-head">
+              <h3>New chat in worktree</h3>
+            </div>
+            <label className="field">
+              <span>Name</span>
+              <input
+                autoFocus
+                value={wtNew.name}
+                onChange={(e) => setWtNew({ ...wtNew, name: e.target.value, error: undefined })}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void commitWtNew()
+                  else if (e.key === 'Escape') setWtNew(null)
+                }}
+              />
+            </label>
+            <p className="modal-text muted">
+              Creates <span className="mono">.claude/worktrees/{wtNew.name.trim() || '…'}</span> on a new branch{' '}
+              <span className="mono">worktree-{wtNew.name.trim() || '…'}</span> from HEAD, so this chat's file changes stay apart from the others.
+            </p>
+            {wtNew.error && <div className="wt-error">{wtNew.error}</div>}
+            <div className="modal-actions">
+              <button className="btn" onClick={() => setWtNew(null)}>
+                Cancel
+              </button>
+              <button className="btn primary" onClick={() => void commitWtNew()} disabled={!wtNew.name.trim() || wtNew.busy}>
+                Create
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {wtRemove && (
+        <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && setWtRemove(null)}>
+          <div className="modal rename-modal">
+            <div className="modal-head">
+              <h3>Remove worktree {wtRemove.name}?</h3>
+            </div>
+            <p className="modal-text">
+              This deletes the folder <span className="mono">{shortPath(wtRemove.path, home)}</span> including any uncommitted changes in it and closes
+              its chat. The branch <span className="mono">worktree-{wtRemove.name}</span> and the chat transcripts are kept.
+            </p>
+            {wtRemove.error && <div className="wt-error">{wtRemove.error}</div>}
+            <div className="modal-actions">
+              <button className="btn" autoFocus onClick={() => setWtRemove(null)}>
+                Cancel
+              </button>
+              <button className="btn danger" onClick={() => void commitWtRemove()} disabled={wtRemove.busy}>
+                Remove worktree
               </button>
             </div>
           </div>
@@ -876,6 +995,7 @@ function SessionRow({
   now,
   compact,
   keepWarm,
+  remote,
   warmedAt,
   onOpen,
   onMenu,
@@ -890,6 +1010,8 @@ function SessionRow({
   /** Chats section: title line only. */
   compact?: boolean
   keepWarm: boolean
+  /** Remote Control switched on for this session (state of the live connection, if any). */
+  remote?: string
   warmedAt?: number
   onOpen: () => void
   onMenu: (e: React.MouseEvent) => void
@@ -929,6 +1051,7 @@ function SessionRow({
     background: 'transparent',
   }
   const title = s.customTitle || s.summary || s.firstPrompt || 'Untitled'
+  const wt = s.cwd ? worktreeOf(s.cwd) : null
   return (
     <button
       className={`row ${active ? 'active' : ''}`}
@@ -972,6 +1095,17 @@ function SessionRow({
           {modelLabel(model ?? (live ? chat.requestedModel : undefined))}
           {effort && <span className="row-effort"> · {effort}</span>}
         </span>
+        {wt && (
+          <span className="wt-chip" title={`Git worktree ${wt.name}`}>
+            <FolderGit2 size={10} />
+            <span>{wt.name}</span>
+          </span>
+        )}
+        {remote && (
+          <span className={`row-remote ${remote}`} title={remote === 'on' ? 'Remote Control on' : remote === 'error' ? 'Remote Control error' : 'Remote Control'}>
+            <Smartphone size={11} />
+          </span>
+        )}
         {(s.gitBranch || meta?.gitBranch) && s.gitBranch !== 'HEAD' && <span className="row-branch">{s.gitBranch || meta?.gitBranch}</span>}
       </div>
       )}

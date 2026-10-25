@@ -1,0 +1,164 @@
+/* Background tasks strip above the composer, and the "Run in background" button on Bash tool cards. */
+.tasks-strip {
+  position: relative;
+  max-width: 1032px;
+  margin: 0 auto 6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.task-pill {
+  display: inline-flex;
+  align-items: center;
+  max-width: 280px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-2);
+  font-size: 12px;
+  color: var(--text-2);
+}
+.task-pill.on {
+  border-color: var(--accent-muted);
+}
+.task-pill.ended {
+  opacity: 0.6;
+}
+.task-pill-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 3px 10px;
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.task-pill-type,
+.task-pill-time,
+.task-pill-status {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--muted);
+}
+.task-pill-time {
+  font-variant-numeric: tabular-nums;
+  font-size: 11.5px;
+}
+.task-pill-status.completed {
+  color: var(--ok);
+}
+.task-pill-status.failed {
+  color: var(--err);
+}
+.task-pill-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.task-pill-x {
+  display: inline-flex;
+  padding: 3px 7px 3px 0;
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+.task-pill-x:hover {
+  color: var(--text);
+}
+.task-pill .spin {
+  animation: task-spin 1.2s linear infinite;
+}
+@keyframes task-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.task-pop {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 6px);
+  z-index: 60;
+  width: min(560px, 100%);
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border-2);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--text-2);
+  animation: dd-in 0.12s ease-out;
+}
+.task-pop-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 600;
+  color: var(--text-2);
+  min-width: 0;
+}
+.task-pop-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.task-pop-meta {
+  font-size: 11.5px;
+}
+.task-pop-out {
+  margin: 0;
+  height: 220px;
+  overflow: auto;
+  padding: 8px 10px;
+  background: var(--code-bg);
+  border-radius: 8px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--text-2);
+}
+.task-pop-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+.task-pop-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: 7px;
+  border: 1px solid var(--border-2);
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  cursor: pointer;
+}
+.task-pop-btn:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.task-pop-btn.ghost {
+  border-color: transparent;
+  color: var(--muted);
+}
+.bg-btn {
+  flex-shrink: 0;
+  padding: 1px 8px;
+  border: 1px solid var(--border-2);
+  border-radius: 7px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.bg-btn:hover {
+  background: var(--surface-2);
+  color: var(--text-2);
+}

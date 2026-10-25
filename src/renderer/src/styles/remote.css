@@ -1,0 +1,26 @@
+/* Remote Control (claude.ai/code, Claude mobile app) */
+.icon-btn.remote-btn.on {
+  background: transparent;
+  color: var(--text-2);
+}
+.icon-btn.remote-btn.connected {
+  color: var(--accent-muted);
+}
+.icon-btn.remote-btn.connecting {
+  opacity: 0.6;
+}
+.icon-btn.remote-btn.error {
+  color: color-mix(in srgb, var(--err) 75%, var(--muted));
+}
+.row-remote {
+  display: inline-flex;
+  align-items: center;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.row-remote.on {
+  color: var(--accent-muted);
+}
+.row-remote.error {
+  color: color-mix(in srgb, var(--err) 75%, var(--muted));
+}

@@ -2,6 +2,7 @@ import {
   query,
   type Query,
   type SDKUserMessage,
+  type SDKMessage,
   type CanUseTool,
   type Options,
   type PermissionResult,
@@ -9,7 +10,7 @@ import {
 } from '@anthropic-ai/claude-agent-sdk'
 import { existsSync } from 'node:fs'
 import { CHATS_DIR } from './paths'
-import type { StartChatOptions, PermissionResponse, PermissionMode, ModelChoice, EffortLevel, SlashCommandInfo, AgentChoice, UserContent } from '../shared/types'
+import type { StartChatOptions, PermissionResponse, PermissionMode, ModelChoice, EffortLevel, SlashCommandInfo, AgentChoice, UserContent, McpServerInfo } from '../shared/types'
 
 /** Minimal push-based async iterable used as the streaming prompt. */
 class PushQueue<T> implements AsyncIterable<T> {
@@ -46,6 +47,19 @@ interface PendingPermission {
   suggestions: PermissionUpdate[]
 }
 
+/** Remote-control tap (see remote.ts): lets a RemoteBridge mirror this runner to claude.ai. All optional-call, never throws into the runner. */
+export interface RemoteHooks {
+  /** Every SDKMessage the runner forwards to the renderer. */
+  message(m: SDKMessage): void
+  /** A message was queued for the CLI from the local UI (not from claude.ai). */
+  userSent(content: UserContent, uuid: string): void
+  permissionRequest(req: { requestId: string; toolName: string; input: Record<string, unknown>; toolUseID: string; suggestions: PermissionUpdate[]; decisionReason?: string; blockedPath?: string }): void
+  /** A pending permission was answered locally or cancelled. */
+  permissionDone(requestId: string): void
+  /** The runner is closing / its CLI loop ended. */
+  closed(): void
+}
+
 export type Emit = (channel: string, payload: unknown) => void
 
 /** System prompt of the general chats: a claude.ai-style assistant with web access, no coding-agent framing. */
@@ -68,6 +82,8 @@ export class ChatRunner {
   private pending = new Map<string, PendingPermission>()
   private closed = false
   private sentInitContext = false
+  /** Remote-control tap; set by RemoteBridge.enable. */
+  remote: RemoteHooks | null = null
   private resolveDone!: () => void
   /** Resolves once the CLI process loop has ended (or at once if it never started). */
   readonly done = new Promise<void>((res) => {
@@ -100,10 +116,12 @@ export class ChatRunner {
           decisionReason: o.decisionReason,
           blockedPath: o.blockedPath,
         })
+        this.remote?.permissionRequest({ requestId: o.requestId, toolName, input, toolUseID: o.toolUseID, suggestions, decisionReason: o.decisionReason, blockedPath: o.blockedPath })
         o.signal.addEventListener('abort', () => {
           if (!this.pending.has(o.requestId)) return
           this.pending.delete(o.requestId)
           this.emit('permission:cancel', { chatId: this.chatId, requestId: o.requestId })
+          this.remote?.permissionDone(o.requestId)
           resolve({ behavior: 'deny', message: 'Request cancelled' })
         })
       })
@@ -147,6 +165,7 @@ export class ChatRunner {
       for await (const m of this.q!) {
         if (process.env.CCD_LOG_EVENTS) this.log(`event ${JSON.stringify(m).slice(0, m.type === 'result' ? 4000 : 600)}`)
         this.emit('agent:event', { chatId: this.chatId, gen: this.gen, message: m })
+        this.remote?.message(m)
         if (m.type === 'result') void this.emitContext()
         // Fill the context meter before the first turn, too.
         else if (m.type === 'system' && m.subtype === 'init' && !this.sentInitContext) {
@@ -159,6 +178,7 @@ export class ChatRunner {
     } finally {
       for (const [, p] of this.pending) p.resolve({ behavior: 'deny', message: 'Session ended' })
       this.pending.clear()
+      this.remote?.closed()
       // A deliberate close (tab closed, /clear, replaced by a new runner) is not an exit
       // the renderer should hear about: it would mark the replacement chat as ended.
       if (!this.closed) this.emit('chat:exit', { chatId: this.chatId, gen: this.gen, error })
@@ -167,6 +187,7 @@ export class ChatRunner {
   }
 
   send(content: UserContent, uuid: string): void {
+    this.remote?.userSent(content, uuid)
     this.queue.push({
       type: 'user',
       // ContentBlock is a subset of the Messages API content block params.
@@ -180,14 +201,17 @@ export class ChatRunner {
     const p = this.pending.get(requestId)
     if (!p) return
     this.pending.delete(requestId)
+    this.remote?.permissionDone(requestId)
     if (response.behavior === 'allow') {
       const updatedPermissions = response.remember
         ? p.suggestions.filter((s) => (s as any).destination === 'localSettings')
         : undefined
+      const perms: PermissionUpdate[] = [...(updatedPermissions ?? [])]
+      if (response.mode) perms.push({ type: 'setMode', mode: response.mode, destination: 'session' } as PermissionUpdate)
       p.resolve({
         behavior: 'allow',
         updatedInput: response.updatedInput ?? p.input,
-        ...(updatedPermissions && updatedPermissions.length ? { updatedPermissions } : {}),
+        ...(perms.length ? { updatedPermissions: perms } : {}),
       })
     } else {
       p.resolve({ behavior: 'deny', message: response.message, interrupt: response.interrupt })
@@ -254,6 +278,43 @@ export class ChatRunner {
     return agents.map((a) => ({ name: a.name, description: a.description, model: a.model }))
   }
 
+  /** File/folder suggestions for `@` mentions from the CLI's own file index (undocumented control request). */
+  async fileSuggestions(query: string): Promise<string[]> {
+    const q = this.q as any
+    if (!q || typeof q.request !== 'function') return []
+    try {
+      const r = await q.request({ subtype: 'file_suggestions', query })
+      const list: { path?: unknown }[] = r?.response?.suggestions ?? []
+      const absOk = query.startsWith('/') || query.startsWith('~')
+      return list
+        .map((s) => (typeof s.path === 'string' ? s.path : ''))
+        .filter((p) => p && (absOk || !p.startsWith('/')))
+    } catch {
+      return []
+    }
+  }
+
+  async mcpStatus(): Promise<McpServerInfo[]> {
+    const list = (await this.q?.mcpServerStatus()) ?? []
+    return list.map((s) => ({
+      name: s.name,
+      status: s.status,
+      error: s.error,
+      scope: s.scope,
+      source: s.source,
+      version: s.serverInfo?.version,
+      tools: (s.tools ?? []).map((t) => ({ name: t.name, description: t.description })),
+    }))
+  }
+
+  async toggleMcp(name: string, enabled: boolean): Promise<void> {
+    await this.q?.toggleMcpServer(name, enabled)
+  }
+
+  async reconnectMcp(name: string): Promise<void> {
+    await this.q?.reconnectMcpServer(name)
+  }
+
   /** Keep-alive: an (undocumented) /btw side question reuses the cache prefix and leaves no transcript entry. */
   async warmCache(): Promise<boolean> {
     const q = this.q as any
@@ -269,9 +330,40 @@ export class ChatRunner {
     }
   }
 
+  /** Tail (<= 8 KiB, may hold ANSI escapes) of a background task's output; null when unavailable. */
+  async taskOutput(taskId: string): Promise<{ output: string; total_bytes: number; truncated: boolean } | null> {
+    const q = this.q as any
+    if (!q || typeof q.getTaskOutput !== 'function') return null
+    try {
+      return (await q.getTaskOutput(taskId)) ?? null
+    } catch (e) {
+      this.log(`taskOutput failed: ${e instanceof Error ? e.message : String(e)}`)
+      return null
+    }
+  }
+
+  async stopTask(taskId: string): Promise<void> {
+    try {
+      await this.q?.stopTask(taskId)
+    } catch (e) {
+      this.log(`stopTask failed: ${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+
+  /** Moves the foreground task started by toolUseId (or every foreground task) to the background. */
+  async backgroundTasks(toolUseId?: string): Promise<boolean> {
+    try {
+      return (await (this.q as any)?.backgroundTasks(toolUseId)) ?? false
+    } catch (e) {
+      this.log(`backgroundTasks failed: ${e instanceof Error ? e.message : String(e)}`)
+      return false
+    }
+  }
+
   /** Resolves when the CLI has exited, or after 5 s so a hung process never blocks the caller. */
   close(): Promise<void> {
     this.closed = true
+    this.remote?.closed()
     this.queue.close()
     try {
       this.q?.close()

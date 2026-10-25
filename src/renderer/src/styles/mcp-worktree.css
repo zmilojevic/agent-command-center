@@ -1,0 +1,172 @@
+/* MCP popover */
+.mcp-btn {
+  position: relative;
+  gap: 4px;
+}
+.mcp-count {
+  font-size: 11px;
+  color: var(--muted);
+}
+.mcp-dot {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--err) 60%, var(--muted));
+}
+.mcp-pop {
+  min-width: 440px;
+  max-width: min(560px, 90vw);
+  max-height: 70vh;
+  overflow-y: auto;
+}
+.mcp-head {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+.mcp-empty {
+  padding: 6px 0;
+}
+.mcp-server + .mcp-server {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+}
+.mcp-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.mcp-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 2px;
+  background: none;
+  border: 0;
+  color: var(--text-2);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.mcp-main:disabled {
+  cursor: default;
+}
+.mcp-chev {
+  flex-shrink: 0;
+  color: var(--muted);
+  transition: transform 0.12s;
+}
+.mcp-chev.open {
+  transform: rotate(90deg);
+}
+.mcp-chev.hidden {
+  visibility: hidden;
+}
+.mcp-status {
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--muted);
+  opacity: 0.6;
+}
+.mcp-status.connected {
+  background: var(--ok);
+  opacity: 0.8;
+}
+.mcp-status.failed {
+  background: var(--err);
+  opacity: 0.7;
+}
+.mcp-status.needs-auth,
+.mcp-status.pending {
+  background: var(--warn);
+  opacity: 0.8;
+}
+.mcp-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mcp-chip {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0 7px;
+}
+.mcp-tools-n {
+  flex-shrink: 0;
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--muted);
+}
+.mcp-note {
+  margin: 2px 0 2px 28px;
+  font-size: 12px;
+  color: var(--muted);
+  word-break: break-word;
+}
+.mcp-note.err {
+  color: color-mix(in srgb, var(--err) 65%, var(--muted));
+}
+.mcp-tools {
+  list-style: none;
+  margin: 4px 0 2px 28px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.mcp-tools li {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.mcp-tool-name {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--text-2);
+}
+.mcp-tool-desc {
+  font-size: 11.5px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.switch:disabled {
+  opacity: 0.5;
+}
+
+/* Chat in a git checkout of its own: sidebar/top bar chip and dialog error */
+.wt-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 140px;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.wt-chip > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wt-chip > svg {
+  flex-shrink: 0;
+}
+.wt-error {
+  margin-top: 8px;
+  font-size: 12px;
+  color: color-mix(in srgb, var(--err) 65%, var(--muted));
+  white-space: pre-wrap;
+  word-break: break-word;
+}

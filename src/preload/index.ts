@@ -44,6 +44,33 @@ const api: DesktopApi = {
   onUsage: on('usage:changed'),
   onSessionsChanged: on('sessions:changed'),
   onNotificationClick: on('notification:click'),
+  onTrayNewChat: on('tray:newChat'),
+  // ---- @file mentions / plan mode
+  fileSuggestions: (chatId, query) => ipcRenderer.invoke('chat:files', chatId, query),
+  // ---- background tasks
+  taskOutput: (chatId, taskId) => ipcRenderer.invoke('chat:taskOutput', chatId, taskId),
+  stopTask: (chatId, taskId) => ipcRenderer.invoke('chat:stopTask', chatId, taskId),
+  backgroundTasks: (chatId, toolUseId) => ipcRenderer.invoke('chat:backgroundTasks', chatId, toolUseId),
+  // ---- mcp / worktrees
+  mcpStatus: (chatId) => ipcRenderer.invoke('chat:mcpStatus', chatId),
+  mcpToggle: (chatId, name, enabled) => ipcRenderer.invoke('chat:mcpToggle', chatId, name, enabled),
+  mcpReconnect: (chatId, name) => ipcRenderer.invoke('chat:mcpReconnect', chatId, name),
+  worktreeAdd: (cwd, name) => ipcRenderer.invoke('git:worktreeAdd', cwd, name),
+  worktreeRemove: (path, force) => ipcRenderer.invoke('git:worktreeRemove', path, force),
+  // ---- changes actions / open in editor
+  gitSetStaged: (cwd, file, staged) => ipcRenderer.invoke('git:setStaged', cwd, file, staged),
+  gitDiscardFile: (cwd, file) => ipcRenderer.invoke('git:discardFile', cwd, file),
+  gitDiscardHunk: (cwd, patch) => ipcRenderer.invoke('git:discardHunk', cwd, patch),
+  appTools: () => ipcRenderer.invoke('app:tools'),
+  openInEditor: (path, line, editorId) => ipcRenderer.invoke('app:openInEditor', path, line, editorId),
+  openTerminal: (dir, terminalId) => ipcRenderer.invoke('app:openTerminal', dir, terminalId),
+
+  // ---- remote control
+  remoteEnable: (chatId, info) => ipcRenderer.invoke('remote:enable', chatId, info),
+  remoteDisable: (chatId) => ipcRenderer.invoke('remote:disable', chatId),
+  onRemoteState: on('remote:state'),
+  onRemoteMessage: on('chat:remoteMessage'),
+  onRemoteSetting: on('remote:setting'),
 }
 
 contextBridge.exposeInMainWorld('desktop', api)

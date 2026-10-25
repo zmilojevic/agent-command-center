@@ -1,7 +1,8 @@
-import { execFile } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { promisify } from 'node:util'
-import { stat } from 'node:fs/promises'
-import { join } from 'node:path'
+import { rm, stat, readFile, appendFile, mkdir } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
+import { join, dirname, resolve, sep } from 'node:path'
 import type { ChangedFile, GitChanges } from '../shared/types'
 
 const run = promisify(execFile)
@@ -110,6 +111,9 @@ export async function gitChanges(cwd: string): Promise<GitChanges> {
       files.push({ ...f, path, status: '?', oldPath: undefined })
     }
 
+    const { cached, worktree } = await stagedSets(root)
+    for (const f of files) f.staged = stagedState(f, cached, worktree)
+
     files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
     let total = 0
     let truncated = false
@@ -123,5 +127,147 @@ export async function gitChanges(cwd: string): Promise<GitChanges> {
     return truncated ? { isRepo: true, root, files, truncated } : { isRepo: true, root, files }
   } catch (e) {
     return { isRepo: true, root, files: [], error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+// ---- worktrees -------------------------------------------------------------
+
+const WORKTREE_NAME = /^[A-Za-z0-9._-]{1,60}$/
+const errText = (e: unknown): string => {
+  const err = e as { stderr?: string; message?: string }
+  return (err.stderr || err.message || String(e)).trim()
+}
+
+/** Claude Code's convention: `<root>/.claude/worktrees/<name>` on branch `worktree-<name>`, created from HEAD. */
+export async function createWorktree(cwd: string, name: string): Promise<{ path: string } | { error: string }> {
+  try {
+    if (!WORKTREE_NAME.test(name) || name === '.' || name === '..') {
+      return { error: 'Use 1-60 letters, digits, dots, dashes or underscores.' }
+    }
+    // Always the main checkout, even when cwd is itself inside a linked worktree.
+    const common = (await git(cwd, ['rev-parse', '--path-format=absolute', '--git-common-dir'])).trim()
+    const root = dirname(common)
+    const path = join(root, '.claude', 'worktrees', name)
+    if (existsSync(path)) return { error: `A worktree named "${name}" already exists.` }
+    // Keep the parent repo's status clean: exclude locally, never touch .gitignore.
+    const excludeFile = join(common, 'info', 'exclude')
+    const line = '.claude/worktrees/'
+    let current = ''
+    try {
+      current = await readFile(excludeFile, 'utf8')
+    } catch {
+      /* no file yet */
+    }
+    if (!current.split('\n').some((l) => l.trim() === line)) {
+      await mkdir(join(common, 'info'), { recursive: true })
+      await appendFile(excludeFile, `${current && !current.endsWith('\n') ? '\n' : ''}${line}\n`)
+    }
+    await git(root, ['worktree', 'add', '-b', `worktree-${name}`, path, 'HEAD'])
+    return { path }
+  } catch (e) {
+    return { error: errText(e) }
+  }
+}
+
+/** Removes the worktree folder (branch stays). Runs from the main repo root, not from the worktree itself. */
+export async function removeWorktree(path: string, force: boolean): Promise<{ error?: string }> {
+  try {
+    const common = (await git(path, ['rev-parse', '--path-format=absolute', '--git-common-dir'])).trim()
+    await git(dirname(common), ['worktree', 'remove', ...(force ? ['--force'] : []), path])
+    return {}
+  } catch (e) {
+    return { error: errText(e) }
+  }
+}
+
+// ---- changes actions: staging, discard ----------------------------------------------------------
+
+async function repoRoot(cwd: string): Promise<string> {
+  return (await git(cwd, ['rev-parse', '--show-toplevel'])).trim()
+}
+
+async function hasHead(root: string): Promise<boolean> {
+  try {
+    await git(root, ['rev-parse', '--verify', '-q', 'HEAD'])
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** Sets of paths with staged / unstaged differences (renames split into delete + add). */
+async function stagedSets(root: string): Promise<{ cached: Set<string>; worktree: Set<string> }> {
+  const list = async (args: string[]): Promise<Set<string>> =>
+    new Set((await git(root, ['diff', '--no-renames', '--name-only', '-z', ...args])).split('\0').filter(Boolean))
+  return { cached: await list(['--cached']), worktree: await list([]) }
+}
+
+type FileRef = Pick<ChangedFile, 'path' | 'oldPath' | 'status'>
+
+function stagedState(f: FileRef, cached: Set<string>, worktree: Set<string>): 'all' | 'partial' | 'none' {
+  if (f.status === '?') return 'none'
+  const paths = f.oldPath ? [f.path, f.oldPath] : [f.path]
+  const inCached = paths.filter((p) => cached.has(p)).length
+  if (inCached === 0) return 'none'
+  if (inCached === paths.length && !paths.some((p) => worktree.has(p))) return 'all'
+  return 'partial'
+}
+
+/** Stage or unstage one file. Returns an error message or null. */
+export async function gitSetStaged(cwd: string, file: FileRef, staged: boolean): Promise<string | null> {
+  try {
+    const root = await repoRoot(cwd)
+    const paths = file.oldPath ? [file.oldPath, file.path] : [file.path]
+    if (staged) {
+      if (file.status === 'R' && file.oldPath) await git(root, ['rm', '--cached', '-q', '--ignore-unmatch', '--', file.oldPath])
+      await git(root, file.status === 'D' ? ['add', '-A', '--', file.path] : ['add', '--', file.path])
+    } else if (await hasHead(root)) {
+      await git(root, ['restore', '--staged', '--', ...paths])
+    } else {
+      await git(root, ['rm', '--cached', '-r', '-q', '--', file.path])
+    }
+    return null
+  } catch (e) {
+    return errText(e)
+  }
+}
+
+/** Throw away all uncommitted changes of one file. Returns an error message or null. */
+export async function gitDiscardFile(cwd: string, file: FileRef): Promise<string | null> {
+  try {
+    const root = await repoRoot(cwd)
+    if (file.status === '?') {
+      const abs = resolve(root, file.path)
+      if (!abs.startsWith(root + sep)) return 'Path is outside the repository'
+      await rm(abs, { force: true })
+    } else if (file.status === 'A') {
+      await git(root, ['rm', '-f', '-q', '--', file.path])
+    } else if (file.status === 'R' && file.oldPath) {
+      await git(root, ['restore', '--source=HEAD', '--staged', '--worktree', '--', file.oldPath])
+      await git(root, ['rm', '-f', '-q', '--', file.path])
+    } else {
+      await git(root, ['restore', '--source=HEAD', '--staged', '--worktree', '--', file.path])
+    }
+    return null
+  } catch (e) {
+    return errText(e)
+  }
+}
+
+/** Reverse-apply a one-hunk patch (file header + hunk) to the working tree only. */
+export async function gitDiscardHunk(cwd: string, patch: string): Promise<string | null> {
+  try {
+    const root = await repoRoot(cwd)
+    return await new Promise<string | null>((done) => {
+      const p = spawn('git', ['apply', '-R', '--recount', '--whitespace=nowarn', '-'], { cwd: root })
+      let err = ''
+      p.stderr.on('data', (d) => (err += d))
+      p.on('error', (e) => done(e.message))
+      p.on('close', (code) => done(code === 0 ? null : err.trim() || `git apply exited with ${code}`))
+      p.stdin.on('error', () => {})
+      p.stdin.end(patch.endsWith('\n') ? patch : patch + '\n')
+    })
+  } catch (e) {
+    return errText(e)
   }
 }

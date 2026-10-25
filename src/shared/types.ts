@@ -125,7 +125,7 @@ export interface PermissionRequest {
 }
 
 export type PermissionResponse =
-  | { behavior: 'allow'; updatedInput?: Record<string, unknown>; remember?: boolean }
+  | { behavior: 'allow'; updatedInput?: Record<string, unknown>; remember?: boolean; mode?: PermissionMode }
   | { behavior: 'deny'; message: string; interrupt?: boolean }
 
 export interface ModelChoice {
@@ -178,6 +178,8 @@ export interface ChangedFile {
   deletions: number
   binary?: boolean
   diff?: string
+  /** Whether the file's changes are in the index: fully, partly or not at all (untracked = none). */
+  staged?: 'all' | 'partial' | 'none'
 }
 export interface GitChanges {
   isRepo: boolean
@@ -185,6 +187,43 @@ export interface GitChanges {
   files: ChangedFile[]
   truncated?: boolean
   error?: string
+}
+
+export interface McpServerInfo {
+  name: string
+  status: 'connected' | 'failed' | 'needs-auth' | 'pending' | 'disabled'
+  error?: string
+  scope?: string
+  source?: string
+  version?: string
+  tools: { name: string; description?: string }[]
+}
+
+export interface LaunchTool {
+  id: string
+  label: string
+}
+export interface LaunchTools {
+  editors: LaunchTool[]
+  terminals: LaunchTool[]
+}
+
+export type RemoteStateName = 'off' | 'connecting' | 'on' | 'error'
+
+export interface RemoteStateEvent {
+  chatId: string
+  state: RemoteStateName
+  error?: string
+  /** The chat's claude.ai/code address while connected. */
+  url?: string
+}
+
+export interface RemoteEnableInfo {
+  sessionId: string
+  title: string
+  cwd: string
+  model?: string
+  branch?: string
 }
 
 export interface DesktopApi {
@@ -218,7 +257,7 @@ export interface DesktopApi {
   openPath(path: string): Promise<void>
   homeDir(): Promise<string>
   chatsDir(): Promise<string>
-  window(action: 'minimize' | 'maximize' | 'close' | 'reload' | 'devtools'): void
+  window(action: 'minimize' | 'maximize' | 'close' | 'reload' | 'devtools' | 'quit'): void
   /** Mirrors the renderer's theme into Electron's nativeTheme (window background, native widgets). */
   setTheme(theme: Theme): void
   onAgentEvent(cb: (e: AgentEvent) => void): () => void
@@ -229,4 +268,40 @@ export interface DesktopApi {
   onUsage(cb: (u: PlanUsage) => void): () => void
   onSessionsChanged(cb: () => void): () => void
   onNotificationClick(cb: (e: { chatId: string }) => void): () => void
+  /** Tray menu "New chat". */
+  onTrayNewChat(cb: () => void): () => void
+  // ---- @file mentions / plan mode
+  /** File/folder suggestions for an `@` mention from the CLI's file index (relative paths, folders end with '/'). */
+  fileSuggestions(chatId: string, query: string): Promise<string[]>
+  // ---- background tasks
+  /** Tail (<= 8 KiB, may contain ANSI escapes) of a background task's output; null when unavailable. */
+  taskOutput(chatId: string, taskId: string): Promise<{ output: string; total_bytes: number; truncated: boolean } | null>
+  stopTask(chatId: string, taskId: string): Promise<void>
+  /** Backgrounds the foreground task of that tool call, or all foreground tasks when omitted. */
+  backgroundTasks(chatId: string, toolUseId?: string): Promise<boolean>
+  // ---- mcp / worktrees
+  mcpStatus(chatId: string): Promise<McpServerInfo[]>
+  mcpToggle(chatId: string, name: string, enabled: boolean): Promise<void>
+  mcpReconnect(chatId: string, name: string): Promise<void>
+  /** Creates `<repo root>/.claude/worktrees/<name>` on branch `worktree-<name>` from HEAD. */
+  worktreeAdd(cwd: string, name: string): Promise<{ path: string } | { error: string }>
+  /** Removes the worktree folder; the branch is kept. */
+  worktreeRemove(path: string, force: boolean): Promise<{ error?: string }>
+  // ---- changes actions / open in editor (each resolves with an error message or null)
+  gitSetStaged(cwd: string, file: Pick<ChangedFile, 'path' | 'oldPath' | 'status'>, staged: boolean): Promise<string | null>
+  gitDiscardFile(cwd: string, file: Pick<ChangedFile, 'path' | 'oldPath' | 'status'>): Promise<string | null>
+  /** `patch` = one file's diff header plus a single hunk; reverse-applied to the working tree. */
+  gitDiscardHunk(cwd: string, patch: string): Promise<string | null>
+  appTools(): Promise<LaunchTools>
+  openInEditor(path: string, line?: number, editorId?: string): Promise<string | null>
+  openTerminal(dir: string, terminalId?: string): Promise<string | null>
+
+  // ---- remote control
+  remoteEnable(chatId: string, info: RemoteEnableInfo): Promise<void>
+  remoteDisable(chatId: string): Promise<void>
+  onRemoteState(cb: (e: RemoteStateEvent) => void): () => void
+  /** A user message typed on claude.ai/the phone (already queued for the CLI). */
+  onRemoteMessage(cb: (e: { chatId: string; text: string; uuid: string }) => void): () => void
+  /** Model / permission mode changed from claude.ai. */
+  onRemoteSetting(cb: (e: { chatId: string; model?: string; permissionMode?: PermissionMode }) => void): () => void
 }

@@ -1,9 +1,9 @@
 import { create } from 'zustand'
 import { immer } from 'zustand/middleware/immer'
-import type { SessionSummary, PermissionRequest, PermissionMode, ModelChoice, EffortLevel, StartChatOptions, SessionMeta, ChatContext, SlashCommandInfo, AgentChoice, ContentBlock, UserContent, Theme, GitChanges } from '@shared/types'
+import type { RemoteStateEvent, SessionSummary, PermissionRequest, PermissionMode, ModelChoice, EffortLevel, StartChatOptions, SessionMeta, ChatContext, SlashCommandInfo, AgentChoice, ContentBlock, UserContent, Theme, GitChanges } from '@shared/types'
 import { applySdkMessage, applyTranscript, emptyModel, findTool, type ChatModel, type Block } from './reduce'
 import type { ImageAttachment } from './images'
-import { basename } from './util'
+import { basename, projectRoot } from './util'
 
 export interface QueuedMessage {
   id: string
@@ -86,6 +86,10 @@ interface State {
   sessionSortTime: Record<string, number>
   /** Session ids whose prompt cache is kept warm while idle. */
   keepWarm: string[]
+  /** Session ids with Remote Control switched on (restored when the chat's runner starts). */
+  remoteSessions: string[]
+  /** Live Remote Control state per chat (not persisted). */
+  remote: Record<string, RemoteStateEvent>
   /** Per session: when the last keep-alive request started (cache refreshed). */
   warmedAt: Record<string, number>
   /** Keep-alive requests in flight (not persisted). */
@@ -100,6 +104,11 @@ interface State {
   lastCwd: string
   notifications: boolean
   theme: Theme
+  /** Preferred editor / terminal ids ('' = first detected; editor 'system' = OS handler). */
+  editor: string
+  terminal: string
+  setEditor(id: string): void
+  setTerminal(id: string): void
   findOpen: boolean
   /** Git working-tree changes keyed by cwd. */
   changes: Record<string, ChangesEntry>
@@ -119,6 +128,8 @@ interface State {
   closeTab(chatId: string): void
   clearChat(chatId: string): Promise<void>
   setKeepWarm(sessionId: string, on: boolean): void
+  /** Remote Control (claude.ai/code, mobile app) for a session; project chats only. */
+  setRemote(sessionId: string, on: boolean): void
   tickKeepWarm(): Promise<void>
   sendMessage(chatId: string, text: string, images?: ImageAttachment[], fromDraft?: boolean): Promise<void>
   /** Queue a message; fromDraft (default) also clears the composer. */
@@ -225,6 +236,8 @@ export const useStore = create<State>()(
     hiddenSessions: prefs.get<string[]>('hiddenSessions', []),
     sessionSortTime: prefs.get<Record<string, number>>('sessionSortTime', {}),
     keepWarm: prefs.get<string[]>('keepWarm', []),
+    remoteSessions: prefs.get<string[]>('remoteSessions', []),
+    remote: {},
     warmedAt: prefs.get<Record<string, number>>('warmedAt', {}),
     warming: {},
     warmRetryAt: {},
@@ -241,6 +254,20 @@ export const useStore = create<State>()(
     lastCwd: prefs.get('lastCwd', ''),
     notifications: prefs.get('notifications', true),
     theme: prefs.get<Theme>('theme', 'system'),
+    editor: prefs.get('editor', ''),
+    terminal: prefs.get('terminal', ''),
+    setEditor(id) {
+      prefs.set('editor', id)
+      set((s) => {
+        s.editor = id
+      })
+    },
+    setTerminal(id) {
+      prefs.set('terminal', id)
+      set((s) => {
+        s.terminal = id
+      })
+    },
     findOpen: false,
 
     async loadSessions() {
@@ -361,11 +388,12 @@ export const useStore = create<State>()(
       const chatId = crypto.randomUUID()
       prefs.set('lastModel', model)
       prefs.set('lastMode', permissionMode)
-      prefs.set('lastCwd', cwd)
+      const rootCwd = projectRoot(cwd)
+      prefs.set('lastCwd', rootCwd)
       set((s) => {
         s.lastModel = model
         s.lastMode = permissionMode
-        s.lastCwd = cwd
+        s.lastCwd = rootCwd
         s.chats[chatId] = {
           ...emptyModel(),
           chatId,
@@ -477,6 +505,11 @@ export const useStore = create<State>()(
             s.keepWarm[i] = sessionId
             prefs.set('keepWarm', s.keepWarm)
           }
+          // Remote Control does not carry over to the new session id.
+          if (s.remoteSessions.includes(oldId)) {
+            s.remoteSessions = s.remoteSessions.filter((id) => id !== oldId)
+            prefs.set('remoteSessions', s.remoteSessions)
+          }
           if (oldId in s.warmedAt) {
             delete s.warmedAt[oldId]
             prefs.set('warmedAt', s.warmedAt)
@@ -529,7 +562,6 @@ export const useStore = create<State>()(
         refreshAfterStart(chatId)
       }
       const blocks: Block[] = images.map((im) => ({ kind: 'image', mediaType: im.mediaType, data: im.data }))
-      if (text) blocks.push({ kind: 'text', text })
       let content: UserContent = text
       if (images.length) {
         const parts: ContentBlock[] = images.map((im) => ({ type: 'image', source: { type: 'base64', media_type: im.mediaType, data: im.data } }))
@@ -539,16 +571,11 @@ export const useStore = create<State>()(
       set((s) => {
         const c = s.chats[chatId]
         if (!c) return
-        c.messages.push({ id: uuid, role: 'user', blocks })
-        c.status = 'running'
-        c.error = undefined
-        c.interrupted = false
+        appendUserMessage(c, uuid, text, blocks)
         if (fromDraft) {
           c.draft = ''
           c.attachments = []
         }
-        const t = text || 'Image'
-        if (c.title === 'New chat') c.title = t.length > 60 ? t.slice(0, 57) + '…' : t
       })
       await window.desktop.send(chatId, content, uuid)
     },
@@ -601,6 +628,19 @@ export const useStore = create<State>()(
         else if (!on && has) s.keepWarm = s.keepWarm.filter((id) => id !== sessionId)
         prefs.set('keepWarm', s.keepWarm)
       })
+    },
+
+    setRemote(sessionId, on) {
+      set((s) => {
+        const has = s.remoteSessions.includes(sessionId)
+        if (on && !has) s.remoteSessions.push(sessionId)
+        else if (!on && has) s.remoteSessions = s.remoteSessions.filter((id) => id !== sessionId)
+        prefs.set('remoteSessions', s.remoteSessions)
+      })
+      const chat = Object.values(get().chats).find((c) => c.sessionId === sessionId && !c.closed)
+      if (!chat) return // enabled when the chat's runner starts
+      if (on) void enableRemote(chat.chatId)
+      else void window.desktop.remoteDisable(chat.chatId)
     },
 
     async tickKeepWarm() {
@@ -666,6 +706,11 @@ export const useStore = create<State>()(
         if (req && response.behavior === 'deny') {
           const tool = findTool(c, req.toolUseID)
           if (tool) tool.status = 'denied'
+        }
+        // Plan approval switches the session mode (the runner sends a setMode update with the allow).
+        if (response.behavior === 'allow' && response.mode) {
+          c.requestedMode = response.mode
+          c.permissionMode = response.mode
         }
       })
       await window.desktop.respond(chatId, requestId, response)
@@ -872,15 +917,19 @@ export const useStore = create<State>()(
       const st = get()
       const exits: Promise<void>[] = []
       for (const c of Object.values(st.chats)) {
-        if (c.cwd !== cwd) continue
+        if (projectRoot(c.cwd) !== cwd) continue
         exits.push(window.desktop.closeChat(c.chatId))
         st.closeTab(c.chatId)
       }
       await Promise.all(exits)
-      const ids = st.sessions.filter((x) => x.cwd === cwd).map((x) => x.sessionId)
-      await window.desktop.deleteProject(cwd, ids)
+      // Worktree chats of the project live under their own cwd (and ~/.claude/projects slug).
+      const mine = st.sessions.filter((x) => x.cwd && projectRoot(x.cwd) === cwd)
+      const dirs = [...new Set([cwd, ...mine.map((x) => x.cwd!)])]
+      for (const dir of dirs) {
+        await window.desktop.deleteProject(dir, mine.filter((x) => x.cwd === dir).map((x) => x.sessionId))
+      }
       set((s) => {
-        s.sessions = s.sessions.filter((x) => x.cwd !== cwd)
+        s.sessions = s.sessions.filter((x) => !x.cwd || projectRoot(x.cwd) !== cwd)
         s.pinnedProjects = s.pinnedProjects.filter((d) => d !== cwd)
         s.projectOrder = s.projectOrder.filter((d) => d !== cwd)
         prefs.set('pinnedProjects', s.pinnedProjects)
@@ -913,6 +962,35 @@ async function startRunner(chatId: string, opts: StartChatOptions): Promise<void
     if (!c) return
     if (typeof gen === 'number') c.gen = Math.max(c.gen ?? 0, gen)
     if (!c.closed && c.status === 'starting') c.status = 'idle'
+  })
+  const c = useStore.getState().chats[chatId]
+  if (c?.sessionId && !c.closed && useStore.getState().remoteSessions.includes(c.sessionId)) void enableRemote(chatId)
+}
+
+/** Appends a user message and marks the chat running; shared by locally typed and remote (claude.ai) messages. */
+function appendUserMessage(c: Chat, uuid: string, text: string, blocks?: Block[]): void {
+  c.messages.push({ id: uuid, role: 'user', blocks: blocks ?? (text ? [{ kind: 'text', text }] : []) })
+  if (blocks && text) c.messages[c.messages.length - 1].blocks.push({ kind: 'text', text })
+  c.status = 'running'
+  c.error = undefined
+  c.interrupted = false
+  const t = text || 'Image'
+  if (c.title === 'New chat') c.title = t.length > 60 ? t.slice(0, 57) + '…' : t
+}
+
+/** Connects the chat to claude.ai (Remote Control); project chats only. */
+async function enableRemote(chatId: string): Promise<void> {
+  const st = useStore.getState()
+  const c = st.chats[chatId]
+  if (!c || c.closed || !c.sessionId || isGeneral(c.cwd)) return
+  const sid = c.sessionId
+  const branch = st.meta[sid]?.gitBranch ?? st.sessions.find((x) => x.sessionId === sid)?.gitBranch
+  await window.desktop.remoteEnable(chatId, {
+    sessionId: sid,
+    title: c.title,
+    cwd: c.cwd,
+    model: c.requestedModel,
+    ...(branch && branch !== 'HEAD' ? { branch } : {}),
   })
 }
 
@@ -1138,6 +1216,31 @@ export function wireEvents(): void {
       if (c) c.pending = c.pending.filter((p) => p.requestId !== requestId)
     })
   })
+  // ---- remote control
+  window.desktop.onRemoteState((e) => {
+    useStore.setState((s) => {
+      if (e.state === 'off') delete s.remote[e.chatId]
+      else s.remote[e.chatId] = e
+    })
+  })
+  window.desktop.onRemoteMessage(({ chatId, text, uuid }) => {
+    useStore.setState((s) => {
+      const c = s.chats[chatId]
+      if (!c || c.closed) return
+      appendUserMessage(c, uuid, text)
+    })
+  })
+  window.desktop.onRemoteSetting(({ chatId, model, permissionMode }) => {
+    useStore.setState((s) => {
+      const c = s.chats[chatId]
+      if (!c) return
+      if (model) c.requestedModel = model
+      if (permissionMode) {
+        c.requestedMode = permissionMode
+        c.permissionMode = permissionMode
+      }
+    })
+  })
   window.desktop.onChatContext((ctx) => {
     useStore.setState((s) => {
       const c = s.chats[ctx.chatId]
@@ -1158,6 +1261,11 @@ export function wireEvents(): void {
         if (a.status !== 'running') continue
         a.status = 'failed'
         a.endedAt = Date.now()
+      }
+      for (const t of c.tasks) {
+        if (t.status !== 'running' && t.status !== 'pending' && t.status !== 'paused') continue
+        t.status = 'killed'
+        t.endedAt = Date.now()
       }
     })
   })

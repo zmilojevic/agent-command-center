@@ -8,9 +8,12 @@ import { listSessions, getSessionMessages, renameSession, deleteSession } from '
 import { RunnerRegistry } from './agent'
 import { readSessionMeta } from './sessionMeta'
 import { UsageService } from './usage'
-import { gitChanges } from './git'
+import { gitChanges, createWorktree, removeWorktree, gitSetStaged, gitDiscardFile, gitDiscardHunk } from './git'
+import { launchTools, openInEditor, openTerminal } from './launch'
+import { RemoteManager } from './remote'
 import { CHATS_DIR } from './paths'
-import type { StartChatOptions, PermissionResponse, PermissionMode, UserContent, NotifyRequest, Theme } from '../shared/types'
+import { setupTray, focusWindow } from './tray'
+import type { StartChatOptions, PermissionResponse, PermissionMode, UserContent, NotifyRequest, Theme, RemoteEnableInfo } from '../shared/types'
 
 // Wayland-native when available (Hyprland), X11 fallback otherwise.
 app.commandLine.appendSwitch('ozone-platform-hint', 'auto')
@@ -18,6 +21,13 @@ app.commandLine.appendSwitch('enable-features', 'WaylandWindowDecorations')
 app.commandLine.appendSwitch('disable-renderer-backgrounding')
 
 let win: BrowserWindow | null = null
+let tray: Electron.Tray | null = null
+// Set once the app is really quitting; until then closing the window only hides it to the tray.
+let quitting = false
+const quitApp = (): void => {
+  quitting = true
+  app.quit()
+}
 const windowBg = (): string => (nativeTheme.shouldUseDarkColors ? '#1b1a17' : '#faf9f5')
 
 let usageService: UsageService | null = null
@@ -31,6 +41,7 @@ const log = (s: string): void => {
 // General chats run in this folder; it must exist before any runner starts.
 mkdirSync(CHATS_DIR, { recursive: true })
 const runners = new RunnerRegistry(emit, log)
+const remote = new RemoteManager(runners, emit, log)
 usageService = new UsageService(runners, log, (u) => emit('usage:changed', u))
 
 function createWindow(): void {
@@ -42,7 +53,7 @@ function createWindow(): void {
     frame: false,
     show: false,
     backgroundColor: windowBg(),
-    title: 'Agent Command Center',
+    title: process.env.CCD_WINDOW_TITLE || 'Agent Command Center',
     webPreferences: {
       preload: join(import.meta.dirname, '../preload/index.mjs'),
       sandbox: false,
@@ -50,7 +61,16 @@ function createWindow(): void {
       backgroundThrottling: false,
     },
   })
-  win.once('ready-to-show', () => win?.show())
+  win.on('close', (e) => {
+    if (quitting || !tray) return
+    e.preventDefault()
+    win?.hide()
+  })
+  win.on('closed', () => {
+    win = null
+  })
+  if (process.env.CCD_WINDOW_TITLE) win.on('page-title-updated', (e) => e.preventDefault())
+  win.once('ready-to-show', () => (process.env.CCD_WINDOW_TITLE ? win?.showInactive() : win?.show()))
   win.webContents.setWindowOpenHandler(({ url }) => {
     void shell.openExternal(url)
     return { action: 'deny' }
@@ -125,8 +145,34 @@ ipcMain.handle('chat:close', (_e, chatId: string) => runners.close(chatId))
 ipcMain.handle('chat:models', (_e, chatId: string) => runners.get(chatId)?.listModels() ?? [])
 ipcMain.handle('chat:commands', (_e, chatId: string) => runners.get(chatId)?.listCommands() ?? [])
 ipcMain.handle('chat:agents', (_e, chatId: string) => runners.get(chatId)?.listAgents() ?? [])
+ipcMain.handle('chat:files', (_e, chatId: string, query: string) => runners.get(chatId)?.fileSuggestions(query) ?? [])
 ipcMain.handle('chat:warm', (_e, chatId: string) => runners.get(chatId)?.warmCache() ?? false)
+ipcMain.handle('chat:taskOutput', (_e, chatId: string, taskId: string) => runners.get(chatId)?.taskOutput(taskId) ?? null)
+ipcMain.handle('chat:stopTask', (_e, chatId: string, taskId: string) => runners.get(chatId)?.stopTask(taskId))
+ipcMain.handle('chat:backgroundTasks', (_e, chatId: string, toolUseId?: string) => runners.get(chatId)?.backgroundTasks(toolUseId) ?? false)
 ipcMain.handle('chat:context', (_e, chatId: string) => runners.get(chatId)?.emitContext())
+
+// ---- IPC: mcp / worktrees
+ipcMain.handle('chat:mcpStatus', async (_e, chatId: string) => {
+  try {
+    return (await runners.get(chatId)?.mcpStatus()) ?? []
+  } catch (err) {
+    log(`mcpStatus: ${String(err)}`)
+    return []
+  }
+})
+ipcMain.handle('chat:mcpToggle', (_e, chatId: string, name: string, enabled: boolean) =>
+  runners.get(chatId)?.toggleMcp(name, enabled).catch((err) => log(`mcpToggle: ${String(err)}`)),
+)
+ipcMain.handle('chat:mcpReconnect', (_e, chatId: string, name: string) =>
+  runners.get(chatId)?.reconnectMcp(name).catch((err) => log(`mcpReconnect: ${String(err)}`)),
+)
+ipcMain.handle('git:worktreeAdd', (_e, cwd: string, name: string) => createWorktree(cwd, name))
+ipcMain.handle('git:worktreeRemove', (_e, path: string, force: boolean) => removeWorktree(path, force))
+// ---- IPC: remote control
+
+ipcMain.handle('remote:enable', (_e, chatId: string, info: RemoteEnableInfo) => remote.enable(chatId, info))
+ipcMain.handle('remote:disable', (_e, chatId: string) => remote.disable(chatId))
 
 ipcMain.handle('usage:get', (_e, force?: boolean) => usageService!.get(!!force))
 
@@ -164,11 +210,7 @@ ipcMain.handle('app:notify', (_e, n: NotifyRequest) => {
   }
   notif.on('click', () => {
     drop()
-    if (win && !win.isDestroyed()) {
-      if (win.isMinimized()) win.restore()
-      win.show()
-      win.focus()
-    }
+    if (win && !win.isDestroyed()) void focusWindow(win)
     emit('notification:click', { chatId: n.chatId })
   })
   notif.on('close', drop)
@@ -186,6 +228,13 @@ ipcMain.handle('dialog:pickFolder', async (_e, defaultPath?: string) => {
   return r.canceled ? null : r.filePaths[0]
 })
 ipcMain.handle('git:changes', (_e, cwd: string) => gitChanges(cwd))
+// ---- IPC: git actions / open in editor
+ipcMain.handle('git:setStaged', (_e, cwd: string, file: Parameters<typeof gitSetStaged>[1], staged: boolean) => gitSetStaged(cwd, file, staged))
+ipcMain.handle('git:discardFile', (_e, cwd: string, file: Parameters<typeof gitDiscardFile>[1]) => gitDiscardFile(cwd, file))
+ipcMain.handle('git:discardHunk', (_e, cwd: string, patch: string) => gitDiscardHunk(cwd, patch))
+ipcMain.handle('app:tools', () => launchTools())
+ipcMain.handle('app:openInEditor', (_e, path: string, line?: number, editorId?: string) => openInEditor(path, line, editorId))
+ipcMain.handle('app:openTerminal', (_e, dir: string, terminalId?: string) => openTerminal(dir, terminalId))
 ipcMain.handle('shell:openPath', (_e, p: string) => shell.openPath(p))
 ipcMain.handle('app:home', () => homedir())
 ipcMain.handle('app:chatsDir', () => CHATS_DIR)
@@ -193,7 +242,8 @@ ipcMain.on('app:theme', (_e, theme: Theme) => {
   nativeTheme.themeSource = theme
   win?.setBackgroundColor(windowBg())
 })
-ipcMain.on('window:action', (_e, action: 'minimize' | 'maximize' | 'close' | 'reload' | 'devtools') => {
+ipcMain.on('window:action', (_e, action: 'minimize' | 'maximize' | 'close' | 'reload' | 'devtools' | 'quit') => {
+  if (action === 'quit') return quitApp()
   if (!win) return
   if (action === 'reload') return win.webContents.reload()
   if (action === 'devtools') return win.webContents.toggleDevTools()
@@ -220,20 +270,45 @@ function watchSessions(): void {
     .on('unlinkDir', ping)
 }
 
-app.whenReady().then(() => {
-  // Notification daemons look up the app icon and name through the desktop entry.
-  if (process.platform === 'linux') app.setDesktopName('agent-command-center.desktop')
-
-  createWindow()
-  watchSessions()
-  usageService?.start()
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+// One instance per user-data-dir (test copies use their own). Dev runs skip the lock.
+if (!process.env.ELECTRON_RENDERER_URL && !app.requestSingleInstanceLock()) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    if (win && !win.isDestroyed()) void focusWindow(win)
+    else if (app.isReady()) {
+      createWindow()
+      if (win) void focusWindow(win)
+    }
   })
-})
+
+  app.whenReady().then(() => {
+    // Notification daemons look up the app icon and name through the desktop entry.
+    if (process.platform === 'linux') app.setDesktopName('agent-command-center.desktop')
+
+    createWindow()
+    tray = setupTray({
+      getWindow: () => win,
+      createWindow,
+      quit: quitApp,
+      log,
+      emit,
+    })
+    watchSessions()
+    usageService?.start()
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    })
+  })
+}
 
 app.on('window-all-closed', () => {
+  // With a tray the app lives on; without one the old behaviour applies.
+  if (tray && !quitting) return
   runners.closeAll()
   app.quit()
 })
-app.on('before-quit', () => runners.closeAll())
+app.on('before-quit', () => {
+  quitting = true
+  runners.closeAll()
+})
