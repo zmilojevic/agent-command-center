@@ -1,0 +1,43 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.zmilojevic.agentcommandcenter'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId 'com.zmilojevic.agentcommandcenter'
+        minSdk 30
+        targetSdk 36
+        versionCode 1
+        versionName '0.1.0'
+    }
+
+    // Optional release signing (CI): only defined when ANDROID_KEYSTORE_FILE is set.
+    def keystoreFile = System.getenv('ANDROID_KEYSTORE_FILE')
+    if (keystoreFile) {
+        signingConfigs {
+            release {
+                storeFile file(keystoreFile)
+                storePassword System.getenv('ANDROID_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('ANDROID_KEY_ALIAS')
+                keyPassword System.getenv('ANDROID_KEY_PASSWORD')
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            if (keystoreFile) {
+                signingConfig signingConfigs.release
+            }
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}

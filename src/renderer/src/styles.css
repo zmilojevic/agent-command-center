@@ -1565,6 +1565,12 @@ pre.diff {
 .rename-modal {
   width: 440px;
 }
+.rename-modal.cold-modal {
+  width: 520px;
+}
+.cold-modal .modal-actions {
+  flex-wrap: wrap;
+}
 .modal-text {
   margin: 0;
   color: var(--text-2);

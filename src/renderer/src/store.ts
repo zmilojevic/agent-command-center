@@ -1,10 +1,11 @@
 import { create } from 'zustand'
 import { immer } from 'zustand/middleware/immer'
-import type { RemoteStateEvent, SessionSummary, PermissionRequest, PermissionMode, ModelChoice, EffortLevel, StartChatOptions, SessionMeta, ChatContext, SlashCommandInfo, AgentChoice, ContentBlock, UserContent, Theme, GitChanges } from '@shared/types'
+import type { RemoteStateEvent, SessionSummary, LiveChat, PermissionRequest, PermissionMode, ModelChoice, EffortLevel, StartChatOptions, SessionMeta, ChatContext, SlashCommandInfo, AgentChoice, ContentBlock, UserContent, Theme, GitChanges } from '@shared/types'
 import { applySdkMessage, applyTranscript, emptyModel, findTool, type ChatModel, type Block } from './reduce'
 import type { ImageAttachment } from './images'
-import { basename, projectRoot } from './util'
-import { ensureTerminal, disposeTerminal } from './terminals'
+import { basename, projectRoot, isPhone } from './util'
+import { SHARED_PREFS } from '../../shared/channels'
+import { ensureTerminal, disposeTerminal, terminalExited, whenTerminalReady, pasteToTerminal, focusTerminal } from './terminals'
 
 export interface QueuedMessage {
   id: string
@@ -72,6 +73,9 @@ function chatExtras(): Pick<Chat, 'commands' | 'agents' | 'attachments' | 'queue
 interface State {
   sessions: SessionSummary[]
   sessionsLoaded: boolean
+  /** Live runners in the main process by session id (also those this client has not opened). */
+  live: Record<string, LiveChat>
+  setLive(list: LiveChat[]): void
   meta: Record<string, SessionMeta>
   modelMax: Record<string, number>
   chats: Record<string, Chat>
@@ -145,6 +149,7 @@ interface State {
   toggleTerminal(): void
   restoreTerminals(): Promise<void>
   newTerminal(cwd: string): Promise<void>
+  runInTerminal(cwd: string, text: string, run: boolean): Promise<void>
   killTerminal(id: string): void
   setActiveTerminal(cwd: string, id: string): void
   clearChat(chatId: string): Promise<void>
@@ -208,7 +213,36 @@ const prefs = {
     } catch {
       /* ignore */
     }
+    if (SHARED_PREFS.includes(k)) void Promise.resolve(window.desktop.setSharedPref(k, JSON.stringify(v))).catch(() => {})
   },
+}
+
+function applyShared(key: string, value: unknown): void {
+  const cur = (useStore.getState() as unknown as Record<string, unknown>)[key]
+  if (JSON.stringify(value) === JSON.stringify(cur)) return
+  try {
+    localStorage.setItem(key, JSON.stringify(value))
+  } catch {
+    /* ignore */
+  }
+  useStore.setState({ [key]: value } as never)
+}
+
+/** Pull the shared prefs from main; the desktop seeds main with its own values for keys main lacks. */
+export async function syncSharedPrefs(): Promise<void> {
+  let remote: Record<string, unknown>
+  try {
+    remote = await window.desktop.getSharedPrefs()
+  } catch {
+    return
+  }
+  for (const key of SHARED_PREFS) {
+    if (key in remote) applyShared(key, remote[key])
+    else if (!isPhone) {
+      const v = (useStore.getState() as unknown as Record<string, unknown>)[key]
+      void Promise.resolve(window.desktop.setSharedPref(key, JSON.stringify(v))).catch(() => {})
+    }
+  }
 }
 
 // Stale pref: the sidebar can no longer be hidden.
@@ -260,6 +294,14 @@ export const useStore = create<State>()(
   immer((set, get) => ({
     sessions: [],
     sessionsLoaded: false,
+    live: {},
+    setLive(list) {
+      set((s) => {
+        const next: Record<string, LiveChat> = {}
+        for (const l of list) if (l.sessionId) next[l.sessionId] = l
+        s.live = next
+      })
+    },
     meta: {},
     modelMax: {},
     chats: {},
@@ -323,13 +365,13 @@ export const useStore = create<State>()(
         // session has no transcript yet); this runs only after a successful load.
         const disk = new Set(sessions.map((x) => x.sessionId))
         const open = new Set(Object.values(s.chats).filter((c) => !c.closed && c.sessionId).map((c) => c.sessionId as string))
-        const hidden = s.hiddenSessions.filter((id) => disk.has(id))
+        const hidden = isPhone ? s.hiddenSessions : s.hiddenSessions.filter((id) => disk.has(id))
         if (hidden.length !== s.hiddenSessions.length) {
           s.hiddenSessions = hidden
           prefs.set('hiddenSessions', hidden)
         }
         const keys = Object.keys(s.sessionSortTime)
-        const live = keys.filter((id) => disk.has(id) || open.has(id))
+        const live = isPhone ? keys : keys.filter((id) => disk.has(id) || open.has(id))
         if (live.length !== keys.length) {
           for (const id of keys) if (!live.includes(id)) delete s.sessionSortTime[id]
           prefs.set('sessionSortTime', s.sessionSortTime)
@@ -353,6 +395,8 @@ export const useStore = create<State>()(
     },
 
     async restoreTabs() {
+      // A phone must not start runners on the PC for tabs it had open earlier.
+      if (isPhone) return
       const saved = prefs.get<{ sessions: string[]; active: string | null }>('openTabs', { sessions: [], active: null })
       const list = get().sessions
       // Open in the background so a chat the user clicks meanwhile keeps the focus;
@@ -384,6 +428,11 @@ export const useStore = create<State>()(
       if (existing && !fork) {
         if (!background) get().activate(existing.chatId)
         return
+      }
+      if (!fork) {
+        // A runner for this session already lives in the main process (started here before a reload, or by another client).
+        const liveChat = (await window.desktop.liveChats().catch(() => [] as LiveChat[])).find((l) => l.sessionId === sess.sessionId)
+        if (liveChat && (await attachLive(liveChat.chatId, { background, title: titleFor(sess) }))) return
       }
       const chatId = crypto.randomUUID()
       const cwd = sess.cwd || (await window.desktop.homeDir())
@@ -515,13 +564,15 @@ export const useStore = create<State>()(
     },
 
     closeTab(chatId) {
+      closedHere.add(chatId)
       void window.desktop.closeChat(chatId)
       set((s) => {
         delete s.chats[chatId]
         s.tabs = s.tabs.filter((t) => t !== chatId)
         s.recent = s.recent.filter((t) => t !== chatId && s.tabs.includes(t))
         // Fall back to the chat used most recently before this one, else an empty pane.
-        if (s.activeChatId === chatId) s.activeChatId = s.recent[0] ?? null
+        // The phone falls back to the list.
+        if (s.activeChatId === chatId) s.activeChatId = isPhone ? null : (s.recent[0] ?? null)
         if (s.activeChatId && s.chats[s.activeChatId]) s.chats[s.activeChatId].unread = false
       })
     },
@@ -902,6 +953,28 @@ export const useStore = create<State>()(
       }
     },
 
+    async runInTerminal(cwd, text, run) {
+      if (isPhone || isGeneral(cwd) || !text.trim()) return
+      set((s) => {
+        s.terminalOpen = true
+        prefs.set('terminalOpen', true)
+      })
+      const current = (): string | null => get().terminals[cwd]?.active ?? null
+      let id = current()
+      if (!id || terminalExited(id)) {
+        await get().newTerminal(cwd)
+        id = current()
+        if (!id) return
+        await whenTerminalReady(id)
+      }
+      if (!pasteToTerminal(id, text, run)) return
+      const target = id
+      for (let n = 0; n < 15; n++) {
+        await new Promise((r) => requestAnimationFrame(r))
+        if (focusTerminal(target)) break
+      }
+    },
+
     killTerminal(id) {
       const cwd = Object.keys(get().terminals).find((k) => get().terminals[k].tabs.some((t) => t.id === id))
       if (!cwd) return
@@ -929,7 +1002,7 @@ export const useStore = create<State>()(
     },
 
     async refreshChanges(cwd) {
-      if (isGeneral(cwd) || changesInFlight.has(cwd)) return
+      if (isPhone || isGeneral(cwd) || changesInFlight.has(cwd)) return
       changesInFlight.add(cwd)
       set((s) => {
         s.changes[cwd] = { ...(s.changes[cwd] ?? { isRepo: true, files: [] }), loading: true }
@@ -1081,6 +1154,146 @@ export const useStore = create<State>()(
   })),
 )
 
+/** Chats this client closed itself; a runner kept alive by another client must not pull them back in. */
+const closedHere = new Set<string>()
+const autoAttached = new Set<string>()
+
+/** Applies a transcript to the chat, keeping messages that arrived live and are not in it. */
+function mergeTranscript(c: Chat, entries: Parameters<typeof applyTranscript>[1]): void {
+  const meanwhile = c.messages
+  c.messages = []
+  applyTranscript(c, entries)
+  for (const m of meanwhile) {
+    const dup = c.messages.findIndex((x) => x.id === m.id || (!!m.apiId && x.apiId === m.apiId))
+    if (dup < 0) c.messages.push(m)
+    else if (m.streaming) c.messages[dup] = m
+  }
+}
+
+/** Joins the runner that already lives in the main process under chatId, without starting one. */
+async function attachLive(chatId: string, o: { background: boolean; title?: string }): Promise<boolean> {
+  if (useStore.getState().chats[chatId]) return true
+  const res = await window.desktop.attachChat(chatId)
+  if (!res) return false
+  // Another path (event-driven attach vs. openSession) may have created it meanwhile.
+  if (useStore.getState().chats[chatId]) return true
+  closedHere.delete(chatId)
+  const st = useStore.getState()
+  const sess = res.sessionId ? st.sessions.find((x) => x.sessionId === res.sessionId) : undefined
+  const title = o.title ?? (sess ? titleFor(sess) : 'New chat')
+  const model = res.model ?? modelFor(res.cwd)
+  const effort = effortFor(res.cwd)
+  useStore.setState((s) => {
+    s.chats[chatId] = {
+      ...emptyModel(),
+      chatId,
+      createdAt: Date.now(),
+      title,
+      cwd: res.cwd,
+      sessionId: res.sessionId,
+      status: res.status,
+      gen: res.gen,
+      pending: res.pending,
+      models: [],
+      requestedModel: model,
+      requestedEffort: effort,
+      requestedMode: res.permissionMode,
+      permissionMode: res.permissionMode,
+      transcriptLoaded: false,
+      draft: '',
+      unread: false,
+      ...chatExtras(),
+    }
+    s.tabs.push(chatId)
+    if (o.background) s.recent = [...s.recent.filter((x) => x !== chatId), chatId]
+    else {
+      s.activeChatId = chatId
+      s.recent = [chatId, ...s.recent.filter((x) => x !== chatId)]
+    }
+  })
+  let entries: Awaited<ReturnType<Window['desktop']['getMessages']>> = []
+  if (res.sessionId) {
+    try {
+      entries = await window.desktop.getMessages(res.sessionId, res.cwd)
+    } catch {
+      /* a brand-new session has no transcript yet */
+    }
+  }
+  useStore.setState((s) => {
+    const c = s.chats[chatId]
+    if (!c) return
+    mergeTranscript(c, entries)
+    c.transcriptLoaded = true
+    if (c.title === 'New chat' && c.sessionId) {
+      const x = s.sessions.find((y) => y.sessionId === c.sessionId)
+      if (x) c.title = titleFor(x)
+    }
+  })
+  refreshAfterStart(chatId)
+  return true
+}
+
+/** Desktop: a chat started elsewhere (the phone) shows up in the background, once per chatId. */
+function autoAttach(chatId: string): void {
+  if (isPhone || autoAttached.has(chatId) || closedHere.has(chatId)) return
+  autoAttached.add(chatId)
+  void attachLive(chatId, { background: true })
+    .then((ok) => {
+      if (!ok) autoAttached.delete(chatId)
+    })
+    .catch(() => autoAttached.delete(chatId))
+}
+
+/** Phone: after the socket came back, rejoin every open chat and reload its transcript. */
+async function reattachAll(): Promise<void> {
+  for (const chatId of Object.keys(useStore.getState().chats)) {
+    let res: Awaited<ReturnType<Window['desktop']['attachChat']>> = null
+    try {
+      res = await window.desktop.attachChat(chatId)
+    } catch {
+      continue
+    }
+    if (!res) {
+      useStore.setState((s) => {
+        const c = s.chats[chatId]
+        if (!c) return
+        c.closed = true
+        c.status = 'idle'
+        c.pending = []
+      })
+      continue
+    }
+    const sessionId = res.sessionId
+    let entries: Awaited<ReturnType<Window['desktop']['getMessages']>> | null = null
+    if (sessionId) {
+      try {
+        entries = await window.desktop.getMessages(sessionId, res.cwd)
+      } catch {
+        entries = null
+      }
+    }
+    useStore.setState((s) => {
+      const c = s.chats[chatId]
+      if (!c) return
+      c.closed = false
+      c.gen = res!.gen
+      c.status = res!.status
+      c.pending = res!.pending
+      if (res!.model) c.requestedModel = res!.model
+      c.requestedMode = res!.permissionMode
+      c.permissionMode = res!.permissionMode
+      if (sessionId) c.sessionId = sessionId
+      if (entries) {
+        c.messages = []
+        applyTranscript(c, entries)
+        c.transcriptLoaded = true
+      }
+    })
+  }
+  void useStore.getState().loadSessions()
+  void window.desktop.liveChats().then((l) => useStore.getState().setLive(l))
+}
+
 /**
  * Start the chat's CLI process. In streaming-input mode the CLI only sends its
  * init message once the first turn starts, so the chat counts as ready as soon
@@ -1227,7 +1440,7 @@ function permissionText(req: PermissionRequest): string {
 /** Notify only when the user can't see that chat right now. */
 function maybeNotify(chatId: string, body: string): void {
   const s = useStore.getState()
-  if (!s.notifications) return
+  if (isPhone || !s.notifications) return
   const c = s.chats[chatId]
   if (!c) return
   // Main checks window focus; an inactive chat is out of view either way.
@@ -1289,7 +1502,42 @@ export function wireEvents(): void {
     prefs.set('openTabs', { sessions, active })
   })
   // Prompt-cache keep-alive for chats that opted in.
-  setInterval(() => void useStore.getState().tickKeepWarm(), 30_000)
+  if (!isPhone) setInterval(() => void useStore.getState().tickKeepWarm(), 30_000)
+  // Live runners (also those this client has not opened) drive the sidebar dots.
+  void window.desktop.liveChats().then((l) => useStore.getState().setLive(l)).catch(() => {})
+  window.desktop.onLiveChanged((l) => useStore.getState().setLive(l))
+  window.desktop.onSharedPrefChanged(({ key, value }) => {
+    if (SHARED_PREFS.includes(key)) applyShared(key, value)
+  })
+  if (isPhone) {
+    window.desktop.onReconnected?.(() => {
+      void syncSharedPrefs()
+      void reattachAll()
+    })
+    // Android back = leave the chat for the list. One history entry per open chat view.
+    let inChatEntry = false
+    let ignorePop = false
+    useStore.subscribe((s) => {
+      if (s.activeChatId && !inChatEntry) {
+        inChatEntry = true
+        history.pushState({ ccdChat: s.activeChatId }, '')
+      } else if (!s.activeChatId && inChatEntry) {
+        inChatEntry = false
+        ignorePop = true
+        history.back()
+      }
+    })
+    window.addEventListener('popstate', () => {
+      if (ignorePop) {
+        ignorePop = false
+        return
+      }
+      if (inChatEntry) {
+        inChatEntry = false
+        useStore.getState().activate(null)
+      }
+    })
+  }
   // Keep the changes badge fresh: refresh the folder whenever another chat becomes active.
   let lastChangesChat: string | null = null
   useStore.subscribe((s) => {
@@ -1308,7 +1556,8 @@ export function wireEvents(): void {
   })
   window.desktop.onAgentEvent(({ chatId, gen, message }) => {
     const before = useStore.getState().chats[chatId]
-    if (!before || stale(before, gen)) return
+    if (!before) return autoAttach(chatId)
+    if (stale(before, gen)) return
     useStore.setState((s) => {
       const c = s.chats[chatId]
       if (!c) return
@@ -1332,6 +1581,7 @@ export function wireEvents(): void {
     maybeNotify(chatId, clip120(lastAssistantText(c)))
   })
   window.desktop.onPermissionRequest((req) => {
+    if (!useStore.getState().chats[req.chatId]) return autoAttach(req.chatId)
     useStore.setState((s) => {
       const c = s.chats[req.chatId]
       if (!c) return
@@ -1356,11 +1606,15 @@ export function wireEvents(): void {
       else s.remote[e.chatId] = e
     })
   })
-  window.desktop.onRemoteMessage(({ chatId, text, uuid }) => {
+  window.desktop.onRemoteMessage(({ chatId, text, uuid, images }) => {
+    if (!useStore.getState().chats[chatId]) return autoAttach(chatId)
     useStore.setState((s) => {
       const c = s.chats[chatId]
       if (!c || c.closed) return
-      appendUserMessage(c, uuid, text)
+      // The sender already shows its own message.
+      if (c.messages.some((m) => m.id === uuid)) return
+      const blocks: Block[] | undefined = images?.length ? images.map((im) => ({ kind: 'image', mediaType: im.mediaType, data: im.data })) : undefined
+      appendUserMessage(c, uuid, text, blocks)
     })
   })
   window.desktop.onRemoteSetting(({ chatId, model, permissionMode }) => {

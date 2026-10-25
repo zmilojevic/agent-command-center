@@ -13,7 +13,7 @@ import { homedir } from 'node:os'
 import { isAbsolute } from 'node:path'
 import { CHATS_DIR } from './paths'
 import { claudeExecutable } from './claudeBin'
-import type { StartChatOptions, PermissionResponse, PermissionMode, ModelChoice, EffortLevel, SlashCommandInfo, AgentChoice, UserContent, McpServerInfo } from '../shared/types'
+import type { StartChatOptions, LiveChat, AttachResult, PermissionRequest, PermissionResponse, PermissionMode, ModelChoice, EffortLevel, SlashCommandInfo, AgentChoice, UserContent, McpServerInfo } from '../shared/types'
 
 /** Minimal push-based async iterable used as the streaming prompt. */
 class PushQueue<T> implements AsyncIterable<T> {
@@ -48,6 +48,8 @@ interface PendingPermission {
   resolve: (r: PermissionResult) => void
   input: Record<string, unknown>
   suggestions: PermissionUpdate[]
+  /** The payload emitted as `permission:request`, kept for late-attaching clients. */
+  payload: PermissionRequest
 }
 
 /** Remote-control tap (see remote.ts): lets a RemoteBridge mirror this runner to claude.ai. All optional-call, never throws into the runner. */
@@ -85,6 +87,16 @@ export class ChatRunner {
   private pending = new Map<string, PendingPermission>()
   private closed = false
   private sentInitContext = false
+  /** Client ids ('desktop', 'phone:<id>') that use this runner; it closes when the last one releases it. */
+  readonly holders = new Set<string>()
+  sessionId: string | undefined
+  status: LiveChat['status'] = 'starting'
+  lastModel: string | undefined
+  lastMode: PermissionMode
+  lastActivity = Date.now()
+  /** The CLI loop has ended (crash or deliberate close); the runner is dead but may still be in the registry. */
+  exited = false
+  private startTimer: ReturnType<typeof setTimeout> | undefined
   /** Remote-control tap; set by RemoteBridge.enable. */
   remote: RemoteHooks | null = null
   private resolveDone!: () => void
@@ -99,16 +111,48 @@ export class ChatRunner {
     private log: (s: string) => void,
     /** Distinguishes this runner from earlier ones for the same chat. */
     readonly gen: number,
+    /** Tells the registry that something shown in `summary()` changed. */
+    private onChange: () => void = () => {},
   ) {
     this.chatId = opts.chatId
+    this.sessionId = opts.resume && !opts.fork ? opts.resume : opts.resume ? undefined : (opts.sessionId ?? opts.chatId)
+    this.lastModel = opts.model && opts.model !== 'default' ? opts.model : undefined
+    this.lastMode = opts.permissionMode
+  }
+
+  private setStatus(status: LiveChat['status']): void {
+    if (this.status === status) return
+    this.status = status
+    this.onChange()
+  }
+
+  summary(): LiveChat {
+    return {
+      chatId: this.chatId,
+      gen: this.gen,
+      sessionId: this.sessionId,
+      cwd: this.opts.cwd,
+      status: this.status,
+      pendingCount: this.pending.size,
+      model: this.lastModel,
+      permissionMode: this.lastMode,
+      holders: this.holders.size,
+    }
+  }
+
+  attachInfo(): AttachResult {
+    return { ...this.summary(), pending: this.pendingRequests() }
+  }
+
+  pendingRequests(): PermissionRequest[] {
+    return [...this.pending.values()].map((p) => p.payload)
   }
 
   start(): void {
     const canUseTool: CanUseTool = (toolName, input, o) =>
       new Promise<PermissionResult>((resolve) => {
         const suggestions = (o.suggestions ?? []) as PermissionUpdate[]
-        this.pending.set(o.requestId, { resolve, input, suggestions })
-        this.emit('permission:request', {
+        const payload: PermissionRequest = {
           chatId: this.chatId,
           requestId: o.requestId,
           toolName,
@@ -118,12 +162,17 @@ export class ChatRunner {
           canRemember: !o.suppressAlwaysAllowRule && suggestions.some((s) => (s as any).destination === 'localSettings'),
           decisionReason: o.decisionReason,
           blockedPath: o.blockedPath,
-        })
+        }
+        this.pending.set(o.requestId, { resolve, input, suggestions, payload })
+        this.lastActivity = Date.now()
+        this.emit('permission:request', payload)
+        this.onChange()
         this.remote?.permissionRequest({ requestId: o.requestId, toolName, input, toolUseID: o.toolUseID, suggestions, decisionReason: o.decisionReason, blockedPath: o.blockedPath })
         o.signal.addEventListener('abort', () => {
           if (!this.pending.has(o.requestId)) return
           this.pending.delete(o.requestId)
           this.emit('permission:cancel', { chatId: this.chatId, requestId: o.requestId })
+          this.onChange()
           this.remote?.permissionDone(o.requestId)
           resolve({ behavior: 'deny', message: 'Request cancelled' })
         })
@@ -161,6 +210,11 @@ export class ChatRunner {
     const exe = claudeExecutable()
     if (exe) options.pathToClaudeCodeExecutable = exe
     this.q = query({ prompt: this.queue, options })
+    // A resumed chat gets no init message until its first turn.
+    this.startTimer = setTimeout(() => {
+      if (!this.closed && this.status === 'starting') this.setStatus('idle')
+    }, 1500)
+    this.startTimer.unref?.()
     void this.loop()
   }
 
@@ -169,6 +223,19 @@ export class ChatRunner {
     try {
       for await (const m of this.q!) {
         if (process.env.CCD_LOG_EVENTS) this.log(`event ${JSON.stringify(m).slice(0, m.type === 'result' ? 4000 : 600)}`)
+        this.lastActivity = Date.now()
+        const sid = (m as { session_id?: unknown }).session_id
+        if (typeof sid === 'string') this.sessionId = sid
+        if (this.status === 'starting') this.setStatus('idle')
+        if (m.type === 'result') this.setStatus('idle')
+        else if (m.type === 'system' && m.subtype === 'status') {
+          if (m.status === 'compacting') this.setStatus('compacting')
+          else if (m.status === 'requesting') this.setStatus('running')
+          else if (this.status === 'compacting') this.setStatus('running')
+        } else if (m.type === 'system' && m.subtype === 'init' && typeof m.model === 'string' && m.model !== this.lastModel) {
+          this.lastModel = m.model
+          this.onChange()
+        }
         this.emit('agent:event', { chatId: this.chatId, gen: this.gen, message: m })
         this.remote?.message(m)
         if (m.type === 'result') void this.emitContext()
@@ -183,6 +250,9 @@ export class ChatRunner {
     } finally {
       for (const [, p] of this.pending) p.resolve({ behavior: 'deny', message: 'Session ended' })
       this.pending.clear()
+      clearTimeout(this.startTimer)
+      this.exited = true
+      this.onChange()
       this.remote?.closed()
       // A deliberate close (tab closed, /clear, replaced by a new runner) is not an exit
       // the renderer should hear about: it would mark the replacement chat as ended.
@@ -192,6 +262,8 @@ export class ChatRunner {
   }
 
   send(content: UserContent, uuid: string): void {
+    this.lastActivity = Date.now()
+    this.setStatus('running')
     this.remote?.userSent(content, uuid)
     this.queue.push({
       type: 'user',
@@ -206,7 +278,10 @@ export class ChatRunner {
     const p = this.pending.get(requestId)
     if (!p) return
     this.pending.delete(requestId)
+    this.lastActivity = Date.now()
     this.remote?.permissionDone(requestId)
+    this.emit('permission:cancel', { chatId: this.chatId, requestId })
+    this.onChange()
     if (response.behavior === 'allow') {
       const updatedPermissions = response.remember
         ? p.suggestions.filter((s) => (s as any).destination === 'localSettings')
@@ -251,6 +326,8 @@ export class ChatRunner {
 
   async setModel(model?: string): Promise<void> {
     await this.q?.setModel(model && model !== 'default' ? model : undefined)
+    this.lastModel = model && model !== 'default' ? model : undefined
+    this.onChange()
   }
 
   /** Session-scoped (flag layer): never written to the user's settings files. */
@@ -260,6 +337,8 @@ export class ChatRunner {
 
   async setPermissionMode(mode: PermissionMode): Promise<void> {
     await this.q?.setPermissionMode(mode)
+    this.lastMode = mode
+    this.onChange()
   }
 
   async listModels(): Promise<ModelChoice[]> {
@@ -361,6 +440,7 @@ export class ChatRunner {
   /** Resolves when the CLI has exited, or after 5 s so a hung process never blocks the caller. */
   close(): Promise<void> {
     this.closed = true
+    clearTimeout(this.startTimer)
     this.remote?.closed()
     this.queue.close()
     try {
@@ -438,22 +518,79 @@ export class RunnerRegistry {
   private closing = new Map<string, Promise<void>>()
   private nextGen = 1
 
-  constructor(private emit: Emit, private log: (s: string) => void) {}
+  private liveTimer: ReturnType<typeof setTimeout> | undefined
+
+  constructor(private emit: Emit, private log: (s: string) => void) {
+    // Runners kept alive only by phones are reaped once idle for 30 minutes.
+    setInterval(() => this.reap(), 60_000).unref?.()
+  }
+
+  private changed = (): void => {
+    if (this.liveTimer) return
+    this.liveTimer = setTimeout(() => {
+      this.liveTimer = undefined
+      this.emit('chat:liveChanged', this.list())
+    }, 300)
+  }
+
+  private reap(): void {
+    const now = Date.now()
+    for (const r of [...this.runners.values()]) {
+      if (r.exited) {
+        this.runners.delete(r.chatId)
+        this.changed()
+        continue
+      }
+      if (r.holders.size === 0 || ![...r.holders].every((h) => h.startsWith('phone:'))) continue
+      if (r.status === 'idle' && r.pendingRequests().length === 0 && now - r.lastActivity > 30 * 60_000) void this.close(r.chatId)
+    }
+  }
+
+  list(): LiveChat[] {
+    return [...this.runners.values()].filter((r) => !r.exited).map((r) => r.summary())
+  }
+
+  attach(chatId: string, client: string): AttachResult | null {
+    const r = this.runners.get(chatId)
+    if (!r || r.exited) return null
+    if (!r.holders.has(client)) {
+      r.holders.add(client)
+      this.changed()
+    }
+    return r.attachInfo()
+  }
+
+  /** Drops the client's hold; the runner closes once nobody holds it. */
+  release(chatId: string, client: string): Promise<void> {
+    const r = this.runners.get(chatId)
+    if (!r) return this.closing.get(chatId) ?? Promise.resolve()
+    r.holders.delete(client)
+    if (r.holders.size > 0) {
+      this.changed()
+      return Promise.resolve()
+    }
+    return this.close(chatId)
+  }
 
   /** Starts (or restarts) the chat's CLI process and returns the runner's generation. */
-  start(opts: StartChatOptions): number {
+  start(opts: StartChatOptions, client: string): number {
     const gen = this.nextGen++
+    const inherited = this.runners.get(opts.chatId)?.holders
     void this.close(opts.chatId)
     // Spawning the CLI in a missing directory fails with a misleading
     // "native binary failed to launch" error, so report it plainly.
     if (!existsSync(opts.cwd)) {
       this.runners.delete(opts.chatId)
       this.emit('chat:exit', { chatId: opts.chatId, gen, error: `Project folder ${opts.cwd} does not exist.` })
+      this.changed()
       return gen
     }
-    const r = new ChatRunner(opts, this.emit, this.log, gen)
+    const r = new ChatRunner(opts, this.emit, this.log, gen, this.changed)
+    for (const h of inherited ?? []) r.holders.add(h)
+    r.holders.add(client)
     this.runners.set(opts.chatId, r)
     r.start()
+    this.changed()
     return gen
   }
 
@@ -466,6 +603,7 @@ export class RunnerRegistry {
     const r = this.runners.get(chatId)
     if (!r) return this.closing.get(chatId) ?? Promise.resolve()
     this.runners.delete(chatId)
+    this.changed()
     const p = r.close().finally(() => {
       if (this.closing.get(chatId) === p) this.closing.delete(chatId)
     })

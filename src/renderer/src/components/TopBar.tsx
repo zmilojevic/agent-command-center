@@ -1,6 +1,6 @@
-import { Minus, Square, X, GitBranch, Folder, MessageCircle, FolderGit2 } from 'lucide-react'
+import { ChevronLeft, Minus, Square, X, GitBranch, Folder, MessageCircle, FolderGit2 } from 'lucide-react'
 import { useStore, isGeneral } from '../store'
-import { projectName, shortPath, worktreeOf, modLabel } from '../util'
+import { projectName, shortPath, worktreeOf, modLabel, isPhone } from '../util'
 import { useEffect, useState } from 'react'
 import ContextMeter from './ContextMeter'
 import UsageMeter from './UsageMeter'
@@ -39,6 +39,21 @@ export default function TopBar() {
   const add = hasChanges ? changes!.files.reduce((n, f) => n + f.additions, 0) : 0
   const del = hasChanges ? changes!.files.reduce((n, f) => n + f.deletions, 0) : 0
   const branch = chat?.sessionId ? sessions.find((s) => s.sessionId === chat.sessionId)?.gitBranch : undefined
+
+  if (isPhone) {
+    return (
+      <header className="topbar phone-topbar">
+        {chat && (
+          <button className="icon-btn phone-back" title="Back" onClick={() => useStore.getState().activate(null)}>
+            <ChevronLeft size={22} />
+          </button>
+        )}
+        <span className="phone-title">{chat ? chat.title : 'Agent Command Center'}</span>
+        {chat && <ContextMeter chat={chat} />}
+        <SettingsPopover />
+      </header>
+    )
+  }
 
   return (
     <header className="topbar drag">

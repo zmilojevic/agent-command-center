@@ -1,10 +1,33 @@
 export const isWin = typeof window !== 'undefined' && window.desktop?.platform === 'win32'
+/** True in the phone web UI (window.desktop is the WebSocket shim). */
+export const isPhone = typeof window !== 'undefined' && window.desktop?.client === 'mobile'
 export const isMac = typeof window !== 'undefined' && window.desktop?.platform === 'darwin'
 
 /** 'Ctrl+Shift+G' -> '⌘⇧G' on macOS, unchanged elsewhere. */
 export function modLabel(s: string): string {
   if (!isMac) return s
   return s.replace(/Ctrl\+?/g, '⌘').replace(/Shift\+?/g, '⇧').replace(/Alt\+?/g, '⌥')
+}
+
+/** Copies text; falls back to a hidden textarea when the async clipboard API is missing (insecure context, e.g. the phone over http). */
+export async function copyText(text: string): Promise<void> {
+  try {
+    if (navigator.clipboard?.writeText) return await navigator.clipboard.writeText(text)
+  } catch {
+    /* fall through to the legacy path */
+  }
+  const ta = document.createElement('textarea')
+  ta.value = text
+  ta.setAttribute('readonly', '')
+  ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0;pointer-events:none'
+  document.body.appendChild(ta)
+  ta.select()
+  ta.setSelectionRange(0, text.length)
+  try {
+    document.execCommand('copy')
+  } finally {
+    ta.remove()
+  }
 }
 
 export function basename(p: string): string {
@@ -101,4 +124,15 @@ export function worktreeOf(cwd: string): { root: string; name: string } | null {
 
 export function projectRoot(cwd: string): string {
   return worktreeOf(cwd)?.root ?? cwd
+}
+
+/** Command text of a shell code block: strips `$ ` prompts; with mixed lines keeps only the prompted ones (the rest is output). */
+export function shellCommandText(code: string): string {
+  const text = code.replace(/\n+$/, '')
+  const lines = text.split('\n')
+  const prompted = lines.filter((l) => l.startsWith('$ '))
+  if (!prompted.length) return text
+  const nonEmpty = lines.filter((l) => l.trim())
+  if (prompted.length === nonEmpty.length) return lines.filter((l) => l.trim()).map((l) => l.slice(2)).join('\n')
+  return prompted.map((l) => l.slice(2)).join('\n')
 }

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Terminal, Activity, Workflow, ListTree, Loader, Check, X, Ban, Copy } from 'lucide-react'
 import { useStore } from '../store'
 import { useNow } from '../hooks'
-import { fmtDuration } from '../util'
+import { fmtDuration, copyText } from '../util'
 import type { BgTask } from '../reduce'
 
 const ENDED_VISIBLE_MS = 10 * 60 * 1000
@@ -95,7 +95,7 @@ function TaskPopover({ chatId, task, now, onClose }: { chatId: string; task: BgT
             Stop
           </button>
         )}
-        <button className="task-pop-btn" onClick={() => void navigator.clipboard.writeText(output ?? '')}>
+        <button className="task-pop-btn" onClick={() => void copyText(output ?? '')}>
           <Copy size={12} /> Copy output
         </button>
         <button className="task-pop-btn ghost" onClick={onClose}>

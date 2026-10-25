@@ -65,3 +65,27 @@
 .term-body .xterm-viewport {
   background-color: transparent !important;
 }
+
+.codeblock-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.run-term-btn {
+  display: inline-flex;
+  align-items: center;
+  margin-left: auto;
+  padding: 2px 4px;
+  border-radius: 5px;
+  color: var(--muted);
+  opacity: 0.7;
+  cursor: pointer;
+}
+.run-term-btn:hover {
+  opacity: 1;
+  color: var(--text-2);
+  background: var(--surface-2);
+}
+.tool-summary + .run-term-btn {
+  margin-left: 0;
+}

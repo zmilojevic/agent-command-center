@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { ChevronDown, Check } from 'lucide-react'
 import type React from 'react'
 
@@ -31,6 +31,7 @@ export default function Dropdown({
   const [open, setOpen] = useState(false)
   const [hi, setHi] = useState(-1)
   const root = useRef<HTMLDivElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
   const selected = options.find((o) => o.value === value)
 
   useEffect(() => {
@@ -60,6 +61,19 @@ export default function Dropdown({
     }
   }, [open, hi, options, onChange])
 
+  // Keep the menu inside the viewport horizontally (narrow phone screens).
+  useLayoutEffect(() => {
+    const el = menuRef.current
+    if (!open || !el) return
+    el.style.translate = ''
+    const r = el.getBoundingClientRect()
+    const vw = document.documentElement.clientWidth
+    let dx = 0
+    if (r.right > vw - 8) dx = vw - 8 - r.right
+    if (r.left + dx < 8) dx = 8 - r.left
+    if (dx) el.style.translate = `${Math.round(dx)}px 0`
+  }, [open, options])
+
   useEffect(() => {
     if (open) setHi(Math.max(0, options.findIndex((o) => o.value === value)))
   }, [open, options, value])
@@ -72,7 +86,7 @@ export default function Dropdown({
         <ChevronDown size={12} className="dd-chev" />
       </button>
       {open && (
-        <div className={`dd-menu ${placement === 'up' ? 'dd-up' : 'dd-down'}`} role="listbox">
+        <div ref={menuRef} className={`dd-menu ${placement === 'up' ? 'dd-up' : 'dd-down'}`} role="listbox">
           {options.map((o, i) => (
             <button
               type="button"

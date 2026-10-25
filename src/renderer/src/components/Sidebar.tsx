@@ -3,14 +3,14 @@ import { Fragment, useMemo, useRef, useState, useEffect } from 'react'
 import { Plus, Search, Clock, FolderGit2, FolderPlus, ChevronRight, ChevronDown, Pencil, Trash2, GitFork, FolderOpen, Pin, PinOff, MessageSquarePlus, ChevronsDownUp, ChevronsUpDown, XCircle, FolderX, Flame, Snowflake, Check, MessageCircle, GitBranchPlus, Code, SquareTerminal, Smartphone, SlidersHorizontal } from 'lucide-react'
 import { openFolderInEditor, openTerminalAt } from '../openIn'
 import { useStore, KEEP_WARM_MAX_IDLE_MS, isGeneral } from '../store'
-import { EFFORT_LEVELS, type SessionSummary, type ModelChoice } from '@shared/types'
-import { projectName, projectRoot, worktreeOf, relativeTime, shortPath, modelLabel, defaultContextWindow, fmtTokens, fmtElapsed, isMac } from '../util'
+import { EFFORT_LEVELS, type SessionSummary, type LiveChat, type ModelChoice } from '@shared/types'
+import { projectName, projectRoot, worktreeOf, relativeTime, shortPath, modelLabel, defaultContextWindow, fmtTokens, fmtElapsed, isMac, isPhone } from '../util'
 import type { Subagent } from '../reduce'
 import { useNow } from '../hooks'
 import { subagentLine } from './ToolCard'
 import type { Chat } from '../store'
 import type { SessionMeta } from '@shared/types'
-import { dotState, DOT_TITLE } from './TopBar'
+import { dotState, DOT_TITLE, type DotState } from './TopBar'
 import Dropdown from './Dropdown'
 import { useTooltip } from './Tooltip'
 
@@ -38,6 +38,7 @@ interface Group {
 
 /** Focus the composer textarea once it is mounted (retries a few frames after a chat opens). */
 function focusComposer(tries = 10) {
+  if (isPhone) return // would pop the on-screen keyboard over the conversation
   const ta = document.querySelector<HTMLTextAreaElement>('.composer textarea')
   if (ta) ta.focus()
   else if (tries > 0) requestAnimationFrame(() => focusComposer(tries - 1))
@@ -76,6 +77,7 @@ export default function Sidebar() {
   const [groupMenu, setGroupMenu] = useState<{ x: number; y: number; g: Group } | null>(null)
   const meta = useStore((s) => s.meta)
   const keepWarm = useStore((s) => s.keepWarm)
+  const liveRunners = useStore((s) => s.live)
   const warmedAt = useStore((s) => s.warmedAt)
   const setKeepWarm = useStore((s) => s.setKeepWarm)
   const remoteSessions = useStore((s) => s.remoteSessions)
@@ -222,7 +224,12 @@ export default function Sidebar() {
     let state: 'busy' | 'on' | null = null
     for (const x of g.sessions) {
       const c = openBySession[x.sessionId] ? chats[openBySession[x.sessionId]] : undefined
-      if (!c) continue
+      if (!c) {
+        const l = liveRunners[x.sessionId]
+        if (l?.pendingCount) return 'ask'
+        if (l && (l.status === 'running' || l.status === 'compacting')) state = 'busy'
+        continue
+      }
       const d = dotState(c)
       if (d === 'ask') return 'ask'
       if (d === 'busy') state = 'busy'
@@ -564,14 +571,14 @@ export default function Sidebar() {
 
   return (
     <aside className="sidebar">
-      <div
+      {!isPhone && <div
         className={'sb-resize' + (resizing ? ' dragging' : '')}
         onPointerDown={onResizeDown}
         onPointerMove={onResizeMove}
         onPointerUp={onResizeUp}
         onPointerCancel={onResizeUp}
         onDoubleClick={() => setSidebarWidth(390)}
-      />
+      />}
       {tooltip.node}
       <div className="sidebar-head drag">
         <Dropdown
@@ -712,6 +719,7 @@ export default function Sidebar() {
                       <SessionRow
                         s={s}
                         chat={chat}
+                        liveInfo={liveRunners[s.sessionId]}
                         active={!!openBySession[s.sessionId] && openBySession[s.sessionId] === activeChatId}
                         meta={meta[s.sessionId]}
                         modelMax={modelMax}
@@ -757,7 +765,7 @@ export default function Sidebar() {
               <XCircle size={14} /> Close chat
             </button>
           )}
-          {(onDisk.has(menu.s.sessionId) || openBySession[menu.s.sessionId]) && (
+          {!isPhone && (onDisk.has(menu.s.sessionId) || openBySession[menu.s.sessionId]) && (
             <button
               onClick={() => {
                 const on = !keepWarm.includes(menu.s.sessionId)
@@ -770,7 +778,7 @@ export default function Sidebar() {
               {keepWarm.includes(menu.s.sessionId) && <Check size={14} style={{ marginLeft: 'auto' }} />}
             </button>
           )}
-          {!isGeneral(menu.s.cwd) && (onDisk.has(menu.s.sessionId) || openBySession[menu.s.sessionId]) && (
+          {!isPhone && !isGeneral(menu.s.cwd) && (onDisk.has(menu.s.sessionId) || openBySession[menu.s.sessionId]) && (
             <button
               onClick={() => {
                 const on = !remoteSessions.includes(menu.s.sessionId)
@@ -796,7 +804,7 @@ export default function Sidebar() {
               <Pencil size={14} /> Rename…
             </button>
           )}
-          {menu.s.cwd !== generalDir && (
+          {!isPhone && menu.s.cwd !== generalDir && (
             <button onClick={() => void window.desktop.openPath(menu.s.cwd!).then(() => setMenu(null))}>
               <FolderGit2 size={14} /> Open project folder
             </button>
@@ -831,9 +839,11 @@ export default function Sidebar() {
         >
           <MessageSquarePlus size={15} /> New chat
         </button>
-        <button className="btn wide" onClick={() => void addProject()}>
-          <FolderPlus size={15} /> Add project
-        </button>
+        {!isPhone && (
+          <button className="btn wide" onClick={() => void addProject()}>
+            <FolderPlus size={15} /> Add project
+          </button>
+        )}
       </div>
 
       {groupMenu && (
@@ -853,6 +863,8 @@ export default function Sidebar() {
           <button onClick={() => { setWtNew({ cwd: groupMenu.g.cwd, name: `wt-${Math.random().toString(16).slice(2, 6)}` }); setGroupMenu(null) }}>
             <GitBranchPlus size={14} /> New chat in worktree…
           </button>
+          {!isPhone && (
+            <>
           <button onClick={() => void window.desktop.openPath(groupMenu.g.cwd).then(() => setGroupMenu(null))}>
             <FolderOpen size={14} /> Open folder
           </button>
@@ -862,6 +874,8 @@ export default function Sidebar() {
           <button onClick={() => { void openTerminalAt(groupMenu.g.cwd); setGroupMenu(null) }}>
             <SquareTerminal size={14} /> Open in terminal
           </button>
+            </>
+          )}
           <button onClick={() => { setRenamingProject({ cwd: groupMenu.g.cwd, name: groupMenu.g.name }); setGroupMenu(null) }}>
             <Pencil size={14} /> Rename project…
           </button>
@@ -1115,6 +1129,7 @@ function ProjectDefaultsDialog({ cwd, name, onClose }: { cwd: string; name: stri
 function SessionRow({
   s,
   chat,
+  liveInfo,
   active,
   meta,
   modelMax,
@@ -1129,6 +1144,8 @@ function SessionRow({
 }: {
   s: SessionSummary
   chat?: Chat
+  /** Runner in the main process for a session this client has not opened. */
+  liveInfo?: LiveChat
   active: boolean
   meta?: SessionMeta
   modelMax: Record<string, number>
@@ -1146,7 +1163,9 @@ function SessionRow({
   const live = chat && !chat.closed
   const model = (live && chat.model) || meta?.model
   const effort = (live && chat.effort) || meta?.effort
-  const busy = live && (chat.status === 'running' || chat.status === 'compacting' || !!chat.pending.length)
+  const liveBusy = !live && !!liveInfo && (liveInfo.status === 'running' || liveInfo.status === 'compacting' || liveInfo.pendingCount > 0)
+  const busy = (live && (chat.status === 'running' || chat.status === 'compacting' || !!chat.pending.length)) || liveBusy
+  const dot: DotState = live ? dotState(chat) : liveInfo ? (liveInfo.pendingCount > 0 ? 'ask' : liveBusy ? 'busy' : 'idle') : 'idle'
   const lastAt = (live && chat.lastResponseAt) || meta?.lastAt || s.lastModified
   const ttl = meta?.cacheTtlMs ?? 300_000
   const cacheLast = Math.max(lastAt || 0, warmedAt ?? 0)
@@ -1197,7 +1216,7 @@ function SessionRow({
       title={s.firstPrompt}
     >
       <div className="row-line">
-        {live && dotState(chat) !== 'idle' ? <span className={`dot ${dotState(chat)}`} title={DOT_TITLE[dotState(chat)]} /> : <span className="dot slot" />}
+        {dot !== 'idle' ? <span className={`dot ${dot}`} title={DOT_TITLE[dot]} /> : <span className="dot slot" />}
         <span className="row-title">{title}</span>
         {!busy && <span className="row-time" title="Last response finished">{relativeTime(lastAt)}</span>}
       </div>

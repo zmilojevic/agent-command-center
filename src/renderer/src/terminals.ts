@@ -1,5 +1,5 @@
 import { Terminal, type ITheme } from '@xterm/xterm'
-import { isMac } from './util'
+import { isMac, copyText } from './util'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import '@xterm/xterm/css/xterm.css'
@@ -20,6 +20,9 @@ interface Entry {
   replaying: boolean
   queue: ({ data: string; end: number } | { exit: number })[]
   lastEnd: number
+  /** Resolves once the first pty output (the prompt) arrived. */
+  ready: Promise<void>
+  markReady: () => void
   /** Called when the user presses a key after the shell exited (removes the tab). */
   onDismiss?: () => void
 }
@@ -95,7 +98,9 @@ export function ensureTerminal(id: string, exitedCode?: number): Entry {
   const fit = new FitAddon()
   term.loadAddon(fit)
   term.loadAddon(new WebLinksAddon((_ev, uri) => void window.open(uri)))
-  const entry: Entry = { id, term, fit, opened: false, exited: false, muted: true, replaying: true, queue: [], lastEnd: 0 }
+  let markReady: () => void = () => {}
+  const ready = new Promise<void>((r) => (markReady = r))
+  const entry: Entry = { id, term, fit, opened: false, exited: false, muted: true, replaying: true, queue: [], lastEnd: 0, ready, markReady }
   entries.set(id, entry)
 
   term.onData((d) => {
@@ -119,7 +124,7 @@ export function ensureTerminal(id: string, exitedCode?: number): Entry {
     if (macCopy || (ev.ctrlKey && ev.shiftKey && !ev.altKey && k.toLowerCase() === 'c')) {
       ev.preventDefault()
       const sel = term.getSelection()
-      if (sel) void navigator.clipboard.writeText(sel)
+      if (sel) void copyText(sel)
       return false
     }
     if (macPaste || (ev.ctrlKey && ev.shiftKey && !ev.altKey && k.toLowerCase() === 'v')) {
@@ -142,11 +147,13 @@ export function ensureTerminal(id: string, exitedCode?: number): Entry {
         else if (q.end > entry.lastEnd) {
           term.write(q.data)
           entry.lastEnd = q.end
+          entry.markReady()
         }
       }
       if (exitedCode !== undefined && !entry.exited) writeExit(entry, exitedCode)
     }
     // Live chunks stay queued (replaying) until the replay is fully parsed; answers xterm generates meanwhile are dropped.
+    if (data) entry.markReady()
     if (data) term.write(data, finish)
     else finish()
   })
@@ -164,6 +171,7 @@ export function initTerminals(): void {
     else if (end > e.lastEnd) {
       e.term.write(data)
       e.lastEnd = end
+      e.markReady()
     }
   })
   window.desktop.onPtyExit(({ id, code }) => {
@@ -226,4 +234,24 @@ export function disposeTerminal(id: string): void {
 /** True when the keyboard focus sits inside a terminal panel. */
 export function terminalHasFocus(): boolean {
   return !!document.activeElement?.closest('.term-panel')
+}
+
+export function terminalExited(id: string): boolean {
+  return entries.get(id)?.exited ?? false
+}
+
+/** Resolves after the terminal's first output (prompt) or `timeoutMs`. */
+export function whenTerminalReady(id: string, timeoutMs = 2000): Promise<void> {
+  const e = ensureTerminal(id)
+  return Promise.race([e.ready, new Promise<void>((r) => setTimeout(r, timeoutMs))])
+}
+
+/** Paste `text` into the shell (bracketed when the shell enabled it); `run` presses Enter afterwards. */
+export function pasteToTerminal(id: string, text: string, run: boolean): boolean {
+  const e = entries.get(id)
+  if (!e || e.exited) return false
+  if (e.muted) window.desktop.ptyWrite(id, text.replace(/\r?\n/g, '\r'))
+  else e.term.paste(text)
+  if (run) window.desktop.ptyWrite(id, '\r')
+  return true
 }

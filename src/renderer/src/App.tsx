@@ -1,6 +1,6 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import type { CSSProperties } from 'react'
-import { useStore, wireEvents, isGeneral } from './store'
+import { useStore, wireEvents, isGeneral, syncSharedPrefs } from './store'
 import Sidebar from './components/Sidebar'
 import TopBar from './components/TopBar'
 import ChatView from './components/ChatView'
@@ -13,6 +13,17 @@ import TerminalPanel from './components/TerminalPanel'
 import RightDock from './components/RightDock'
 import ToolStrip from './components/ToolStrip'
 import { initTerminals, focusTerminal, terminalHasFocus } from './terminals'
+import { isPhone } from './util'
+
+/** Fixed pill while the phone's socket to the desktop is down. */
+function ReconnectPill() {
+  const [state, setState] = useState<string>(() => window.desktop.connectionState?.() ?? 'open')
+  useEffect(() => {
+    setState(window.desktop.connectionState?.() ?? 'open')
+    return window.desktop.onConnectionState?.(setState)
+  }, [])
+  return state === 'open' ? null : <div className="reconnect-pill">Reconnecting…</div>
+}
 
 /** Focus the composer textarea once it is mounted (retries a few frames after a chat opens). */
 function focusComposer(tries = 40): void {
@@ -52,11 +63,14 @@ export default function App() {
 
   useEffect(() => {
     wireEvents()
-    initTerminals()
-    void useStore.getState().restoreTerminals()
+    if (!isPhone) {
+      initTerminals()
+      void useStore.getState().restoreTerminals()
+    }
     void window.desktop
       .chatsDir()
       .then((dir) => useStore.setState({ generalDir: dir }))
+      .then(syncSharedPrefs)
       .then(loadSessions)
       .then(restoreTabs)
   }, [loadSessions, restoreTabs])
@@ -70,7 +84,7 @@ export default function App() {
   )
 
   useEffect(() => {
-    // Shared guard for chat-level global hotkeys (Ctrl/Alt+W, Alt+Delete): returns the active chat when the
+    // Shared guard for chat-level global hotkeys (Ctrl/Alt+W, Alt+Delete, Ctrl+K/L): returns the active chat when the
     // key may fire (no overlay open; inside a text field only for the empty composer), else undefined.
     const chatHotkeyTarget = (e: KeyboardEvent) => {
       const st = useStore.getState()
@@ -133,7 +147,11 @@ export default function App() {
         requestAnimationFrame(() => {
           if (useStore.getState().activeChatId) focusComposer()
         })
-      } else if (e.altKey && !mod && !e.shiftKey && e.key === 'Delete' && !e.defaultPrevented) {
+      } else if (
+        ((e.altKey && !mod && !e.shiftKey && e.key === 'Delete') ||
+          (mod && !e.altKey && !e.shiftKey && (e.code === 'KeyK' || e.code === 'KeyL'))) &&
+        !e.defaultPrevented
+      ) {
         const chat = chatHotkeyTarget(e)
         if (!chat) return
         e.preventDefault()
@@ -165,7 +183,7 @@ export default function App() {
   }, [newGeneralChat, setShowNewDialog, closeTab, setFindOpen, toggleChanges])
 
   return (
-    <div className="app" style={{ '--sidebar-w': `${sidebarWidth}px` } as CSSProperties}>
+    <div className={`app${activeChatId ? ' has-chat' : ''}`} style={{ '--sidebar-w': `${sidebarWidth}px` } as CSSProperties}>
       <ErrorBoundary name="Sidebar">
         <Sidebar />
       </ErrorBoundary>
@@ -185,7 +203,7 @@ export default function App() {
               )}
             </ErrorBoundary>
           </div>
-          {activeChatId && !generalActive && (changesOpen || terminalOpen) && (
+          {!isPhone && activeChatId && !generalActive && (changesOpen || terminalOpen) && (
             <RightDock>
               {changesOpen && (
                 <ErrorBoundary name="Changes" key={`changes-${activeChatId}`}>
@@ -199,7 +217,7 @@ export default function App() {
               )}
             </RightDock>
           )}
-          {activeChatId && !generalActive && (
+          {!isPhone && activeChatId && !generalActive && (
             <ErrorBoundary name="ToolStrip" key={`toolstrip-${activeChatId}`}>
               <ToolStrip />
             </ErrorBoundary>
@@ -207,6 +225,7 @@ export default function App() {
         </div>
       </main>
       {showNewDialog && <NewSessionDialog />}
+      {isPhone && <ReconnectPill />}
     </div>
   )
 }

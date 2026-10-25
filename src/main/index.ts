@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, ipcMain, dialog, shell, nativeTheme, nativeImage, Notification } from 'electron'
+import { app, BrowserWindow, Menu, dialog, shell, nativeTheme, nativeImage, Notification } from 'electron'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { existsSync, mkdirSync } from 'node:fs'
@@ -6,11 +6,14 @@ import { readdir, rmdir } from 'node:fs/promises'
 import { watch } from 'chokidar'
 import { listSessions, getSessionMessages, renameSession, deleteSession } from '@anthropic-ai/claude-agent-sdk'
 import { RunnerRegistry, listAllModels } from './agent'
+import { handle, on } from './ipc'
+import { registerSharedPrefs } from './sharedPrefs'
 import { readSessionMeta } from './sessionMeta'
 import { UsageService } from './usage'
 import { gitChanges, createWorktree, removeWorktree, gitSetStaged, gitDiscardFile, gitDiscardHunk } from './git'
 import { launchTools, openInEditor, openTerminal } from './launch'
 import { RemoteManager } from './remote'
+import { MobileServer } from './mobile'
 import { PtyManager } from './pty'
 import { CHATS_DIR } from './paths'
 import { setupTray, focusWindow } from './tray'
@@ -40,8 +43,10 @@ const quitApp = (): void => {
 const windowBg = (): string => (nativeTheme.shouldUseDarkColors ? '#1b1a17' : '#faf9f5')
 
 let usageService: UsageService | null = null
+let mobileServer: MobileServer | null = null
 const emit = (channel: string, payload: unknown): void => {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload)
+  mobileServer?.broadcast(channel, payload)
   if (channel === 'agent:event' && (payload as { message?: { type?: string } })?.message?.type === 'result') usageService?.noteResult()
 }
 const log = (s: string): void => {
@@ -52,6 +57,7 @@ mkdirSync(CHATS_DIR, { recursive: true })
 const runners = new RunnerRegistry(emit, log)
 const remote = new RemoteManager(runners, emit, log)
 const ptys = new PtyManager(emit)
+mobileServer = new MobileServer(emit, log)
 usageService = new UsageService(runners, log, (u) => emit('usage:changed', u))
 
 function createWindow(): void {
@@ -94,31 +100,31 @@ function createWindow(): void {
 
 // ---- IPC: sessions -------------------------------------------------------
 
-ipcMain.handle('sessions:list', async () => {
+handle('sessions:list', async () => {
   const all = await listSessions({ limit: 2000 })
   return all.filter((s) => s.cwd)
 })
 
-ipcMain.handle('sessions:messages', async (_e, sessionId: string, cwd?: string) => {
+handle('sessions:messages', async (_ctx, sessionId: string, cwd?: string) => {
   return getSessionMessages(sessionId, { dir: cwd })
 })
 
-ipcMain.handle('sessions:meta', async (_e, items: { sessionId: string; cwd: string }[]) => {
+handle('sessions:meta', async (_ctx, items: { sessionId: string; cwd: string }[]) => {
   const out = await Promise.all(items.map((i) => readSessionMeta(i.sessionId, i.cwd).catch(() => null)))
   return out.filter(Boolean)
 })
 
-ipcMain.handle('sessions:rename', async (_e, sessionId: string, title: string, cwd?: string) => {
+handle('sessions:rename', async (_ctx, sessionId: string, title: string, cwd?: string) => {
   await renameSession(sessionId, title, { dir: cwd })
 })
 
-ipcMain.handle('sessions:delete', async (_e, sessionId: string, cwd?: string) => {
+handle('sessions:delete', async (_ctx, sessionId: string, cwd?: string) => {
   await deleteSession(sessionId, { dir: cwd })
 })
 
 // Removes a project's transcripts. Claude's own per-project data (e.g. `memory/`) is left
 // alone, so the folder is only removed when nothing else is in it.
-ipcMain.handle('sessions:deleteProject', async (_e, cwd: string, sessionIds: string[]) => {
+handle('sessions:deleteProject', async (_ctx, cwd: string, sessionIds: string[]) => {
   for (const id of sessionIds) {
     try {
       await deleteSession(id, { dir: cwd })
@@ -138,33 +144,45 @@ ipcMain.handle('sessions:deleteProject', async (_e, cwd: string, sessionIds: str
 
 // ---- IPC: chat -----------------------------------------------------------
 
-ipcMain.handle('chat:start', (_e, opts: StartChatOptions) => runners.start(opts))
-ipcMain.handle('chat:send', (_e, chatId: string, content: UserContent, uuid: string) => {
-  runners.get(chatId)?.send(content, uuid)
+handle('chat:start', (ctx, opts: StartChatOptions) => runners.start(opts, ctx.client))
+handle('chat:attach', (ctx, chatId: string) => runners.attach(chatId, ctx.client))
+handle('chat:live', () => runners.list())
+handle('chat:send', (ctx, chatId: string, content: UserContent, uuid: string) => {
+  const runner = runners.get(chatId)
+  if (!runner) return
+  runner.send(content, uuid)
+  const blocks = typeof content === 'string' ? [] : content
+  const text = typeof content === 'string' ? content : blocks.flatMap((b) => (b.type === 'text' ? [b.text] : [])).join('\n')
+  const images = blocks.flatMap((b) => (b.type === 'image' ? [{ mediaType: b.source.media_type, data: b.source.data }] : []))
+  emit('chat:remoteMessage', { chatId, uuid, text, ...(images.length ? { images } : {}), origin: ctx.client })
 })
-ipcMain.handle('chat:respond', (_e, chatId: string, requestId: string, response: PermissionResponse) => {
+handle('chat:respond', (_ctx, chatId: string, requestId: string, response: PermissionResponse) => {
   runners.get(chatId)?.respond(requestId, response)
 })
-ipcMain.handle('chat:interrupt', (_e, chatId: string) => runners.get(chatId)?.interrupt())
-ipcMain.handle('chat:setModel', (_e, chatId: string, model?: string) => runners.get(chatId)?.setModel(model))
-ipcMain.handle('chat:setEffort', (_e, chatId: string, effort?: string) => runners.get(chatId)?.setEffort(effort))
-ipcMain.handle('chat:setPermissionMode', (_e, chatId: string, mode: PermissionMode) =>
-  runners.get(chatId)?.setPermissionMode(mode),
-)
-ipcMain.handle('chat:close', (_e, chatId: string) => runners.close(chatId))
-ipcMain.handle('chat:models', (_e, chatId: string) => runners.get(chatId)?.listModels() ?? [])
-ipcMain.handle('app:models', () => listAllModels(runners, log))
-ipcMain.handle('chat:commands', (_e, chatId: string) => runners.get(chatId)?.listCommands() ?? [])
-ipcMain.handle('chat:agents', (_e, chatId: string) => runners.get(chatId)?.listAgents() ?? [])
-ipcMain.handle('chat:files', (_e, chatId: string, query: string) => runners.get(chatId)?.fileSuggestions(query) ?? [])
-ipcMain.handle('chat:warm', (_e, chatId: string) => runners.get(chatId)?.warmCache() ?? false)
-ipcMain.handle('chat:taskOutput', (_e, chatId: string, taskId: string) => runners.get(chatId)?.taskOutput(taskId) ?? null)
-ipcMain.handle('chat:stopTask', (_e, chatId: string, taskId: string) => runners.get(chatId)?.stopTask(taskId))
-ipcMain.handle('chat:backgroundTasks', (_e, chatId: string, toolUseId?: string) => runners.get(chatId)?.backgroundTasks(toolUseId) ?? false)
-ipcMain.handle('chat:context', (_e, chatId: string) => runners.get(chatId)?.emitContext())
+handle('chat:interrupt', (_ctx, chatId: string) => runners.get(chatId)?.interrupt())
+handle('chat:setModel', (_ctx, chatId: string, model?: string) => {
+  emit('remote:setting', { chatId, model: model ?? 'default' })
+  return runners.get(chatId)?.setModel(model)
+})
+handle('chat:setEffort', (_ctx, chatId: string, effort?: string) => runners.get(chatId)?.setEffort(effort))
+handle('chat:setPermissionMode', (_ctx, chatId: string, mode: PermissionMode) => {
+  emit('remote:setting', { chatId, permissionMode: mode })
+  return runners.get(chatId)?.setPermissionMode(mode)
+})
+handle('chat:close', (ctx, chatId: string) => runners.release(chatId, ctx.client))
+handle('chat:models', (_ctx, chatId: string) => runners.get(chatId)?.listModels() ?? [])
+handle('app:models', () => listAllModels(runners, log))
+handle('chat:commands', (_ctx, chatId: string) => runners.get(chatId)?.listCommands() ?? [])
+handle('chat:agents', (_ctx, chatId: string) => runners.get(chatId)?.listAgents() ?? [])
+handle('chat:files', (_ctx, chatId: string, query: string) => runners.get(chatId)?.fileSuggestions(query) ?? [])
+handle('chat:warm', (_ctx, chatId: string) => runners.get(chatId)?.warmCache() ?? false)
+handle('chat:taskOutput', (_ctx, chatId: string, taskId: string) => runners.get(chatId)?.taskOutput(taskId) ?? null)
+handle('chat:stopTask', (_ctx, chatId: string, taskId: string) => runners.get(chatId)?.stopTask(taskId))
+handle('chat:backgroundTasks', (_ctx, chatId: string, toolUseId?: string) => runners.get(chatId)?.backgroundTasks(toolUseId) ?? false)
+handle('chat:context', (_ctx, chatId: string) => runners.get(chatId)?.emitContext())
 
 // ---- IPC: mcp / worktrees
-ipcMain.handle('chat:mcpStatus', async (_e, chatId: string) => {
+handle('chat:mcpStatus', async (_ctx, chatId: string) => {
   try {
     return (await runners.get(chatId)?.mcpStatus()) ?? []
   } catch (err) {
@@ -172,20 +190,27 @@ ipcMain.handle('chat:mcpStatus', async (_e, chatId: string) => {
     return []
   }
 })
-ipcMain.handle('chat:mcpToggle', (_e, chatId: string, name: string, enabled: boolean) =>
+handle('chat:mcpToggle', (_ctx, chatId: string, name: string, enabled: boolean) =>
   runners.get(chatId)?.toggleMcp(name, enabled).catch((err) => log(`mcpToggle: ${String(err)}`)),
 )
-ipcMain.handle('chat:mcpReconnect', (_e, chatId: string, name: string) =>
+handle('chat:mcpReconnect', (_ctx, chatId: string, name: string) =>
   runners.get(chatId)?.reconnectMcp(name).catch((err) => log(`mcpReconnect: ${String(err)}`)),
 )
-ipcMain.handle('git:worktreeAdd', (_e, cwd: string, name: string) => createWorktree(cwd, name))
-ipcMain.handle('git:worktreeRemove', (_e, path: string, force: boolean) => removeWorktree(path, force))
+handle('git:worktreeAdd', (_ctx, cwd: string, name: string) => createWorktree(cwd, name))
+handle('git:worktreeRemove', (_ctx, path: string, force: boolean) => removeWorktree(path, force))
 // ---- IPC: remote control
 
-ipcMain.handle('remote:enable', (_e, chatId: string, info: RemoteEnableInfo) => remote.enable(chatId, info))
-ipcMain.handle('remote:disable', (_e, chatId: string) => remote.disable(chatId))
+handle('remote:enable', (_ctx, chatId: string, info: RemoteEnableInfo) => remote.enable(chatId, info))
+handle('remote:disable', (_ctx, chatId: string) => remote.disable(chatId))
 
-ipcMain.handle('usage:get', (_e, force?: boolean) => usageService!.get(!!force))
+// ---- IPC: phone access (desktop only; the socket refuses the mobile: prefix)
+registerSharedPrefs(emit)
+handle('mobile:status', () => mobileServer!.status())
+handle('mobile:setEnabled', (_ctx, on: boolean) => mobileServer!.setEnabled(!!on))
+handle('mobile:pairStart', () => mobileServer!.pairStart())
+handle('mobile:revoke', (_ctx, id: string) => mobileServer!.revoke(id))
+
+handle('usage:get', (_ctx, force?: boolean) => usageService!.get(!!force))
 
 // ---- IPC: desktop notifications -------------------------------------------
 
@@ -210,7 +235,7 @@ function notificationIcon(): Electron.NativeImage | undefined {
   }
   return notifyIcon
 }
-ipcMain.handle('app:notify', (_e, n: NotifyRequest) => {
+handle('app:notify', (_ctx, n: NotifyRequest) => {
   if (!Notification.isSupported()) return
   // The renderer's document.hasFocus() stays true on Wayland when the window is on
   // another workspace, so the window manager's view decides.
@@ -231,36 +256,36 @@ ipcMain.handle('app:notify', (_e, n: NotifyRequest) => {
 
 // ---- IPC: misc -----------------------------------------------------------
 
-ipcMain.handle('dialog:pickFolder', async (_e, defaultPath?: string) => {
+handle('dialog:pickFolder', async (_ctx, defaultPath?: string) => {
   const r = await dialog.showOpenDialog(win!, {
     properties: ['openDirectory', 'createDirectory'],
     defaultPath: defaultPath && existsSync(defaultPath) ? defaultPath : homedir(),
   })
   return r.canceled ? null : r.filePaths[0]
 })
-ipcMain.handle('git:changes', (_e, cwd: string) => gitChanges(cwd))
+handle('git:changes', (_ctx, cwd: string) => gitChanges(cwd))
 // ---- IPC: git actions / open in editor
-ipcMain.handle('git:setStaged', (_e, cwd: string, file: Parameters<typeof gitSetStaged>[1], staged: boolean) => gitSetStaged(cwd, file, staged))
-ipcMain.handle('git:discardFile', (_e, cwd: string, file: Parameters<typeof gitDiscardFile>[1]) => gitDiscardFile(cwd, file))
-ipcMain.handle('git:discardHunk', (_e, cwd: string, patch: string) => gitDiscardHunk(cwd, patch))
-ipcMain.handle('app:tools', () => launchTools())
-ipcMain.handle('app:openInEditor', (_e, path: string, line?: number, editorId?: string) => openInEditor(path, line, editorId))
-ipcMain.handle('app:openTerminal', (_e, dir: string, terminalId?: string) => openTerminal(dir, terminalId))
+handle('git:setStaged', (_ctx, cwd: string, file: Parameters<typeof gitSetStaged>[1], staged: boolean) => gitSetStaged(cwd, file, staged))
+handle('git:discardFile', (_ctx, cwd: string, file: Parameters<typeof gitDiscardFile>[1]) => gitDiscardFile(cwd, file))
+handle('git:discardHunk', (_ctx, cwd: string, patch: string) => gitDiscardHunk(cwd, patch))
+handle('app:tools', () => launchTools())
+handle('app:openInEditor', (_ctx, path: string, line?: number, editorId?: string) => openInEditor(path, line, editorId))
+handle('app:openTerminal', (_ctx, dir: string, terminalId?: string) => openTerminal(dir, terminalId))
 // ---- IPC: integrated terminal
-ipcMain.handle('pty:create', (_e, cwd: string, cols: number, rows: number) => ptys.create(cwd, cols, rows))
-ipcMain.on('pty:write', (_e, id: string, data: string) => ptys.write(id, data))
-ipcMain.on('pty:resize', (_e, id: string, cols: number, rows: number) => ptys.resize(id, cols, rows))
-ipcMain.handle('pty:kill', (_e, id: string) => ptys.kill(id))
-ipcMain.handle('pty:list', () => ptys.list())
-ipcMain.handle('pty:replay', (_e, id: string) => ptys.replay(id))
-ipcMain.handle('shell:openPath', (_e, p: string) => shell.openPath(p))
-ipcMain.handle('app:home', () => homedir())
-ipcMain.handle('app:chatsDir', () => CHATS_DIR)
-ipcMain.on('app:theme', (_e, theme: Theme) => {
+handle('pty:create', (_ctx, cwd: string, cols: number, rows: number) => ptys.create(cwd, cols, rows))
+on('pty:write', (_ctx, id: string, data: string) => ptys.write(id, data))
+on('pty:resize', (_ctx, id: string, cols: number, rows: number) => ptys.resize(id, cols, rows))
+handle('pty:kill', (_ctx, id: string) => ptys.kill(id))
+handle('pty:list', () => ptys.list())
+handle('pty:replay', (_ctx, id: string) => ptys.replay(id))
+handle('shell:openPath', (_ctx, p: string) => shell.openPath(p))
+handle('app:home', () => homedir())
+handle('app:chatsDir', () => CHATS_DIR)
+on('app:theme', (_ctx, theme: Theme) => {
   nativeTheme.themeSource = theme
   win?.setBackgroundColor(windowBg())
 })
-ipcMain.on('window:action', (_e, action: 'minimize' | 'maximize' | 'close' | 'reload' | 'devtools' | 'quit') => {
+on('window:action', (_ctx, action: 'minimize' | 'maximize' | 'close' | 'reload' | 'devtools' | 'quit') => {
   if (action === 'quit') return quitApp()
   if (!win) return
   if (action === 'reload') return win.webContents.reload()
@@ -336,6 +361,7 @@ if (!process.env.ELECTRON_RENDERER_URL && !app.requestSingleInstanceLock()) {
     })
     watchSessions()
     usageService?.start()
+    void mobileServer?.start()
     app.on('activate', () => {
       if (process.platform === 'darwin' && win && !win.isDestroyed()) void focusWindow(win)
       else if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -352,6 +378,7 @@ app.on('window-all-closed', () => {
 })
 app.on('before-quit', () => {
   quitting = true
+  mobileServer?.stop()
   runners.closeAll()
   ptys.killAll()
 })

@@ -1,0 +1,195 @@
+/* Phone layout (the web UI served to the phone). Everything is scoped to data-client="mobile". */
+html[data-client='mobile'],
+[data-client='mobile'] body,
+[data-client='mobile'] #root {
+  height: 100dvh;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+[data-client='mobile'] body {
+  font-size: 15px;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* ---- two screens: list or chat ---- */
+[data-client='mobile'] .app {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  grid-template-columns: none;
+}
+[data-client='mobile'] .app .sidebar {
+  width: 100%;
+  flex: 1;
+  min-height: 0;
+  border-right: none;
+}
+[data-client='mobile'] .app.has-chat .sidebar {
+  display: none;
+}
+[data-client='mobile'] .app .main {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+  width: 100%;
+}
+/* List screen: keep only the top bar (title + settings) above the list. */
+[data-client='mobile'] .app:not(.has-chat) .main {
+  flex: none;
+  order: -1;
+}
+[data-client='mobile'] .app:not(.has-chat) .main-row {
+  display: none;
+}
+
+/* ---- top bar ---- */
+[data-client='mobile'] .phone-topbar {
+  height: auto;
+  min-height: 46px;
+  padding: env(safe-area-inset-top) calc(6px + env(safe-area-inset-right)) 0 calc(4px + env(safe-area-inset-left));
+  gap: 4px;
+}
+[data-client='mobile'] .phone-back {
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+[data-client='mobile'] .phone-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  color: var(--text-2);
+  padding-left: 6px;
+}
+[data-client='mobile'] .phone-topbar .settings-pop {
+  width: min(300px, calc(100vw - 16px));
+  right: 0;
+}
+
+/* ---- sidebar ---- */
+[data-client='mobile'] .sidebar-head,
+[data-client='mobile'] .sidebar-foot {
+  padding-left: max(10px, env(safe-area-inset-left));
+  padding-right: max(10px, env(safe-area-inset-right));
+}
+[data-client='mobile'] .sidebar-foot {
+  padding-bottom: calc(10px + env(safe-area-inset-bottom));
+}
+[data-client='mobile'] .search input {
+  font-size: 16px;
+}
+[data-client='mobile'] .row {
+  min-height: 52px;
+  -webkit-touch-callout: none;
+}
+[data-client='mobile'] .group-head {
+  min-height: 40px;
+}
+[data-client='mobile'] .context-menu {
+  max-height: calc(100dvh - 16px);
+  overflow-y: auto;
+}
+[data-client='mobile'] .context-menu button {
+  min-height: 40px;
+}
+
+/* ---- chat ---- */
+[data-client='mobile'] .chat-col {
+  max-width: none;
+  padding: 14px 12px 8px;
+  gap: 14px;
+}
+[data-client='mobile'] .md {
+  font-size: 15px;
+}
+[data-client='mobile'] .msg {
+  gap: 8px;
+}
+[data-client='mobile'] .msg.user .bubble {
+  max-width: 90%;
+  padding: 9px 13px;
+}
+[data-client='mobile'] .md pre {
+  overflow-x: auto;
+  max-width: 100%;
+}
+[data-client='mobile'] .md table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+[data-client='mobile'] .md img,
+[data-client='mobile'] .chat-col img {
+  max-width: 100%;
+  height: auto;
+}
+[data-client='mobile'] .msg.assistant .content {
+  overflow-x: hidden;
+}
+
+/* ---- composer ---- */
+[data-client='mobile'] .composer-wrap {
+  padding: 6px 8px calc(8px + env(safe-area-inset-bottom));
+}
+[data-client='mobile'] .composer {
+  max-width: none;
+  width: 100%;
+}
+[data-client='mobile'] .composer textarea {
+  font-size: 16px;
+}
+[data-client='mobile'] .composer-bar {
+  flex-wrap: wrap;
+  padding: 4px 6px 6px 8px;
+}
+[data-client='mobile'] .composer-bar .icon-btn,
+[data-client='mobile'] .composer-bar .dd-trigger,
+[data-client='mobile'] .composer-bar .send {
+  min-width: 36px;
+  min-height: 36px;
+}
+
+/* ---- cards ---- */
+[data-client='mobile'] .perm-actions,
+[data-client='mobile'] .q-options,
+[data-client='mobile'] .plan-card .perm-actions {
+  flex-wrap: wrap;
+}
+[data-client='mobile'] .perm-actions .btn {
+  flex: 1 1 100%;
+  min-height: 40px;
+  justify-content: center;
+}
+
+/* ---- dropdowns / popovers stay inside the screen ---- */
+[data-client='mobile'] .dd-menu {
+  min-width: min(220px, calc(100vw - 16px));
+  max-width: calc(100vw - 16px);
+}
+[data-client='mobile'] .modal {
+  max-height: calc(100dvh - 24px);
+  overflow-y: auto;
+}
+
+/* ---- connection pill ---- */
+.reconnect-pill {
+  position: fixed;
+  top: calc(6px + env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 100;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border-2);
+  color: var(--muted);
+  font-size: 12px;
+  box-shadow: var(--shadow);
+  pointer-events: none;
+}

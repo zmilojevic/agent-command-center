@@ -2,29 +2,47 @@ import { memo, useState } from 'react'
 import ReactMarkdown, { type Options } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
-import { Copy, Check } from 'lucide-react'
-import { looksLikePath } from '../util'
+import { Copy, Check, SquareTerminal } from 'lucide-react'
+import { looksLikePath, copyText, isPhone, shellCommandText } from '../util'
+import { useStore } from '../store'
 import { activeProjectCwd, openFileInEditor, splitLine } from '../openIn'
+
+const SHELL_LANGS = new Set(['sh', 'bash', 'zsh', 'shell', 'console', 'shellsession', 'fish', 'ps1', 'powershell', 'pwsh'])
 
 function CodeBlock({ className, children }: { className?: string; children?: React.ReactNode }) {
   const [copied, setCopied] = useState(false)
   const lang = /language-(\w+)/.exec(className ?? '')?.[1]
   const text = extractText(children)
+  const shell = !!lang && SHELL_LANGS.has(lang.toLowerCase()) && !isPhone && !!activeProjectCwd()
   return (
     <div className="codeblock">
       <div className="codeblock-bar">
         <span>{lang ?? 'text'}</span>
+        <span className="codeblock-actions">
+        {shell && (
+          <button
+            className="icon-btn tiny"
+            title="Run in terminal (Shift+click: paste without running)"
+            onClick={(e) => {
+              const cwd = activeProjectCwd()
+              if (cwd) void useStore.getState().runInTerminal(cwd, shellCommandText(text), !e.shiftKey)
+            }}
+          >
+            <SquareTerminal size={12} />
+          </button>
+        )}
         <button
           className="icon-btn tiny"
           title="Copy"
           onClick={() => {
-            void navigator.clipboard.writeText(text)
+            void copyText(text)
             setCopied(true)
             setTimeout(() => setCopied(false), 1200)
           }}
         >
           {copied ? <Check size={12} /> : <Copy size={12} />}
         </button>
+        </span>
       </div>
       <pre>
         <code className={className}>{children}</code>

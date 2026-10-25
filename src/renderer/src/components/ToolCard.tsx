@@ -19,13 +19,14 @@ import {
   ChevronDown,
   Sparkles,
   ClipboardList,
+  SquareTerminal,
 } from 'lucide-react'
 import type { ToolBlock, Subagent } from '../reduce'
 import { toolSummary } from '../reduce'
 import { useStore } from '../store'
 import { useNow } from '../hooks'
 import { activeProjectCwd, openFileInEditor } from '../openIn'
-import { fmtElapsed } from '../util'
+import { fmtElapsed, isPhone } from '../util'
 import Markdown from './Markdown'
 import type { PermissionRequest } from '@shared/types'
 import DiffView from './DiffView'
@@ -278,6 +279,20 @@ export default function ToolCard({ chatId, block, pending }: { chatId: string; b
             }}
           >
             Run in background
+          </span>
+        )}
+        {block.name === 'Bash' && block.status !== 'running' && !isPhone && !!activeProjectCwd(chatId) && !!i.command && (
+          <span
+            className="run-term-btn"
+            role="button"
+            title="Run in terminal (Shift+click: paste without running)"
+            onClick={(e) => {
+              e.stopPropagation()
+              const cwd = activeProjectCwd(chatId)
+              if (cwd) void useStore.getState().runInTerminal(cwd, String(i.command), !e.shiftKey)
+            }}
+          >
+            <SquareTerminal size={13} />
           </span>
         )}
         {agent && <span className="agent-live">{subagentLine(agent, now)}</span>}

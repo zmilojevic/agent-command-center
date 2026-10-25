@@ -1,0 +1,71 @@
+/* Phone access: gear menu block and pairing modal. */
+.mobile-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 2px 0 6px;
+}
+.mobile-block .btn {
+  align-self: flex-start;
+}
+.mobile-addrs {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  user-select: text;
+}
+.mobile-err {
+  color: var(--err);
+}
+.mobile-device {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+.mobile-device-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pair-modal {
+  width: 380px;
+  align-items: center;
+  text-align: center;
+}
+.pair-modal .modal-head {
+  align-self: stretch;
+}
+.pair-qr {
+  background: #fff;
+  border-radius: 12px;
+  padding: 12px;
+  width: 220px;
+  height: 220px;
+  box-sizing: content-box;
+}
+.pair-qr svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.pair-code {
+  font-family: var(--mono);
+  font-size: 28px;
+  letter-spacing: 0.22em;
+  color: var(--text);
+  user-select: text;
+}
+.pair-url {
+  font-size: 12px;
+  color: var(--muted);
+  word-break: break-all;
+  user-select: text;
+}
+.pair-done {
+  color: var(--ok);
+  font-size: 15px;
+}

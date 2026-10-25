@@ -226,9 +226,43 @@ export interface RemoteEnableInfo {
   branch?: string
 }
 
+/** Summary of a live runner in the main process (shared between the desktop window and phone clients). */
+export interface LiveChat {
+  chatId: string
+  gen: number
+  sessionId?: string
+  cwd: string
+  status: 'starting' | 'idle' | 'running' | 'compacting'
+  pendingCount: number
+  model?: string
+  permissionMode: PermissionMode
+  holders: number
+}
+
+export interface AttachResult extends LiveChat {
+  pending: PermissionRequest[]
+}
+
+export interface MobileStatus {
+  enabled: boolean
+  port: number
+  running: boolean
+  error?: string
+  addresses: string[]
+  devices: { id: string; name: string; createdAt: number; lastSeen: number }[]
+}
+
+export interface PairInfo {
+  code: string
+  url: string
+  expiresAt: number
+}
+
 export interface DesktopApi {
   /** `process.platform` of the host (linux, darwin, win32). */
   platform: string
+  /** Which client this API instance belongs to: the Electron window or the phone web UI. */
+  client: 'desktop' | 'mobile'
   listSessions(): Promise<SessionSummary[]>
   getMessages(sessionId: string, cwd?: string): Promise<TranscriptMessage[]>
   getSessionMeta(items: { sessionId: string; cwd: string }[]): Promise<SessionMeta[]>
@@ -245,7 +279,11 @@ export interface DesktopApi {
   /** 'default' (or undefined) falls back to the model's default effort. */
   setEffort(chatId: string, effort?: string): Promise<void>
   setPermissionMode(chatId: string, mode: PermissionMode): Promise<void>
+  /** Releases this client's hold on the chat; the runner closes when no client holds it any more. */
   closeChat(chatId: string): Promise<void>
+  /** Joins an already running chat; null when no runner exists. */
+  attachChat(chatId: string): Promise<AttachResult | null>
+  liveChats(): Promise<LiveChat[]>
   listModels(chatId: string): Promise<ModelChoice[]>
   /** Models available to the account, from a live runner or a temporary idle query (cached 10 min). */
   listAllModels(): Promise<ModelChoice[]>
@@ -316,7 +354,23 @@ export interface DesktopApi {
   remoteDisable(chatId: string): Promise<void>
   onRemoteState(cb: (e: RemoteStateEvent) => void): () => void
   /** A user message typed on claude.ai/the phone (already queued for the CLI). */
-  onRemoteMessage(cb: (e: { chatId: string; text: string; uuid: string }) => void): () => void
+  onRemoteMessage(cb: (e: { chatId: string; text: string; uuid: string; images?: { mediaType: string; data: string }[]; origin?: string }) => void): () => void
+  /** The set of live runners changed (debounced). */
+  onLiveChanged(cb: (l: LiveChat[]) => void): () => void
+  // ---- phone access (desktop window only)
+  mobileStatus(): Promise<MobileStatus>
+  mobileSetEnabled(on: boolean): Promise<MobileStatus>
+  mobilePairStart(): Promise<PairInfo>
+  mobileRevoke(id: string): Promise<MobileStatus>
+  onMobileChanged(cb: (s: MobileStatus) => void): () => void
+  getSharedPrefs(): Promise<Record<string, unknown>>
+  setSharedPref(key: string, json: string): Promise<void>
+  onSharedPrefChanged(cb: (e: { key: string; value: unknown }) => void): () => void
+  /** Phone shim only: fires after the socket reconnected and re-authenticated. */
+  onReconnected?(cb: () => void): () => void
+  /** Phone shim only: state of the socket to the desktop. */
+  connectionState?(): 'connecting' | 'open' | 'closed'
+  onConnectionState?(cb: (s: 'connecting' | 'open' | 'closed') => void): () => void
   /** Model / permission mode changed from claude.ai. */
   onRemoteSetting(cb: (e: { chatId: string; model?: string; permissionMode?: PermissionMode }) => void): () => void
 }

@@ -5,7 +5,7 @@ import ImageThumb from './ImageThumb'
 import TasksStrip from './TasksStrip'
 import { useStore, isGeneral } from '../store'
 import { EFFORT_LEVELS, PERMISSION_MODES, type PermissionMode, type SlashCommandInfo, type AgentChoice } from '@shared/types'
-import { modelLabel, fmtTokens, modLabel } from '../util'
+import { modelLabel, fmtTokens, modLabel, isPhone } from '../util'
 import { dataUrl, readImages } from '../images'
 
 const FALLBACK_MODELS: { value: string; displayName: string; description?: string }[] = [
@@ -22,7 +22,19 @@ const BUILTIN_COMMANDS: SlashCommandInfo[] = [
   { name: 'clear', description: 'Start a fresh session in this folder', argumentHint: '' },
 ]
 
-function ColdCacheConfirm({ coldFor, tokens, onCancel, onConfirm }: { coldFor: number; tokens?: number; onCancel: () => void; onConfirm: () => void }) {
+function ColdCacheConfirm({
+  coldFor,
+  tokens,
+  onCancel,
+  onConfirm,
+  onClearSend,
+}: {
+  coldFor: number
+  tokens?: number
+  onCancel: () => void
+  onConfirm: () => void
+  onClearSend: () => void
+}) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') {
@@ -37,17 +49,20 @@ function ColdCacheConfirm({ coldFor, tokens, onCancel, onConfirm }: { coldFor: n
   const ago = mins < 60 ? `${mins} min ago` : `${Math.round(mins / 60)} h ago`
   return (
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onCancel()}>
-      <div className="modal rename-modal">
+      <div className="modal rename-modal cold-modal">
         <div className="modal-head">
           <h3>Prompt cache is cold</h3>
         </div>
         <p className="modal-text">
           The cache expired {ago} {'\u2014'} this message re-sends the whole conversation{tokens ? ` (~${fmtTokens(tokens)} tokens)` : ''} without
-          cache, which costs more and uses more of your plan limits.
+          cache, which costs more and uses more of your plan limits. Clearing the context starts a fresh session instead.
         </p>
         <div className="modal-actions">
           <button className="btn" onClick={onCancel}>
             Cancel
+          </button>
+          <button className="btn" title="Start a fresh session in this folder (/clear) and send this message there" onClick={onClearSend}>
+            Clear context &amp; send
           </button>
           <button className="btn primary" autoFocus onClick={onConfirm}>
             Send anyway
@@ -165,6 +180,7 @@ export default function Composer({ chatId }: { chatId: string }) {
     // Don't steal focus from the sidebar (e.g. Delete closed the active chat and focus moved
     // to the next row); opening a chat from the sidebar focuses the composer explicitly.
     if (document.activeElement?.closest('.sidebar')) return
+    if (isPhone) return // the keyboard only opens when the user taps the composer
     ta.current?.focus()
   }, [chatId])
 
@@ -317,6 +333,14 @@ export default function Composer({ chatId }: { chatId: string }) {
     // While Claude works, messages wait in the queue and go out one per finished turn.
     if (busy) enqueue(chatId, text, images)
     else void sendMessage(chatId, text, images, true)
+  }
+
+  const clearAndSend = async (): Promise<void> => {
+    const text = draft.trim()
+    const images = chat.attachments
+    if (!text && !images.length) return
+    await clearChat(chatId)
+    void sendMessage(chatId, text, images, true)
   }
 
   const pick = (c: SlashCommandInfo): void => {
@@ -487,7 +511,7 @@ export default function Composer({ chatId }: { chatId: string }) {
         <textarea
           ref={ta}
           value={draft}
-          placeholder={busy ? 'Claude is working — Enter queues the message, Esc stops' : general ? 'Message Claude…' : 'Message Claude… (Enter to send, / for commands, @ for files and agents, paste or drop images)'}
+          placeholder={busy ? 'Claude is working — Enter queues the message, Esc stops' : general ? 'Message Claude…' : isPhone ? 'Message Claude… (/ for commands, @ for files and agents)' : 'Message Claude… (Enter to send, / for commands, @ for files and agents, paste or drop images)'}
           onChange={(e) => {
             setDraft(chatId, e.target.value)
             setCaret(e.target.selectionStart)
@@ -569,7 +593,8 @@ export default function Composer({ chatId }: { chatId: string }) {
                 return
               }
             }
-            if (e.key === 'Enter' && !e.shiftKey) {
+            // On the phone Enter is a newline (no Shift on the on-screen keyboard); the send button sends.
+            if (e.key === 'Enter' && !e.shiftKey && !isPhone) {
               e.preventDefault()
               submit()
             }
@@ -581,7 +606,13 @@ export default function Composer({ chatId }: { chatId: string }) {
             placement="up"
             title="Model"
             value={currentModel}
-            labelOverride={currentModel === 'default' && chat.model ? modelLabel(chat.model) : undefined}
+            labelOverride={
+              currentModel === 'default' && chat.model
+                ? modelLabel(chat.model)
+                : currentModel !== 'default' && !models.some((m) => m.value === currentModel)
+                  ? modelLabel(currentModel) // raw id (e.g. an attached chat's model) with no matching option
+                  : undefined
+            }
             options={[
               ...(models.some((m) => m.value === 'default') ? [] : [{ value: 'default', label: 'Default' }]),
               ...models.map((m) => ({ value: m.value, label: m.displayName, description: m.description })),
@@ -628,6 +659,7 @@ export default function Composer({ chatId }: { chatId: string }) {
               e.target.value = ''
             }}
           />
+          {!isPhone && (
           <button
             className={`icon-btn${keepWarm ? ' on warm' : ''}${cold ? ' cold' : ''}`}
             disabled={!chat?.sessionId}
@@ -642,7 +674,8 @@ export default function Composer({ chatId }: { chatId: string }) {
           >
             {cold ? <Snowflake size={16} /> : <Flame size={16} />}
           </button>
-          {!general && (
+          )}
+          {!general && !isPhone && (
             <button
               className={`icon-btn remote-btn${remoteWanted ? ' on' : ''}${remote?.state === 'on' ? ' connected' : ''}${remote?.state === 'error' ? ' error' : ''}${remote?.state === 'connecting' ? ' connecting' : ''}`}
               disabled={!chat?.sessionId}
@@ -666,7 +699,7 @@ export default function Composer({ chatId }: { chatId: string }) {
             <ImagePlus size={16} />
           </button>
           {!general && (
-            <button className="icon-btn" title={`Clear the conversation (/clear, ${modLabel('Alt+Delete')})`} onClick={() => void clearChat(chatId)}>
+            <button className="icon-btn" title={`Clear the conversation (/clear, ${modLabel('Ctrl+L')} / ${modLabel('Alt+Delete')})`} onClick={() => void clearChat(chatId)}>
               <Eraser size={16} />
             </button>
           )}
@@ -697,6 +730,11 @@ export default function Composer({ chatId }: { chatId: string }) {
           onConfirm={() => {
             setColdConfirm(false)
             doSend()
+            ta.current?.focus()
+          }}
+          onClearSend={() => {
+            setColdConfirm(false)
+            void clearAndSend()
             ta.current?.focus()
           }}
         />

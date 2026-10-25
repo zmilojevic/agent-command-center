@@ -12,8 +12,11 @@ import './styles/remote.css'
 import './styles/terminal.css'
 import './styles/toolstrip.css'
 import './styles/platform.css'
+import './styles/mobile-pair.css'
+import './styles/phone.css'
 
 document.documentElement.dataset.platform = window.desktop.platform
+document.documentElement.dataset.client = window.desktop.client
 
 // Apply the saved theme before the first paint so the window never flashes the wrong palette.
 initTheme()
