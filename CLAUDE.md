@@ -34,7 +34,7 @@ the same day. It replaced the idea of tweaking the GTK `claude-session-manager` 
 - Cross-platform packaging (added 2026-10-25): `electron-builder.yml` (productName "Agent Command Center" only there, never in
   package.json; `extraResources` = `resources/` → `<resourcesPath>/resources`; `asarUnpack` node-pty + `@anthropic-ai/claude-agent-sdk-*`;
   `npmRebuild: false`), `pnpm dist:linux|mac|win` (must run on that OS: node-pty and the SDK's per-platform optional binary).
-  CI `.github/workflows/build.yml` (manual dispatch or `v*` tag → artifacts + draft release); unsigned unless repo secrets
+  CI `.github/workflows/build.yml` (push to main or manual dispatch → artifacts; `v*` tag → also a draft release); unsigned unless repo secrets
   `CSC_LINK`/`CSC_KEY_PASSWORD`/`APPLE_*` (mac, notarized) or `WIN_CSC_LINK`/`WIN_CSC_KEY_PASSWORD` exist; unsigned mac = ad-hoc
   (`-c.mac.identity=-`). The `android` job builds the APK too (artifact `agent-command-center-android`, attached to the release). Icons: `scripts/make-icons.sh` → `build/icon.png` (1024, mac padding), `build/icon.ico`,
   `resources/trayTemplate{,@2x}.png` (mac menu bar). Local check: `pnpm exec electron-builder --linux dir` → `dist/linux-unpacked`.
