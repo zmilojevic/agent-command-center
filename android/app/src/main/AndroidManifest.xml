@@ -5,7 +5,7 @@
 
     <application
         android:icon="@mipmap/ic_launcher"
-        android:label="Agent Command Center"
+        android:label="Hearth"
         android:usesCleartextTraffic="true"
         android:theme="@style/AppTheme">
 

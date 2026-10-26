@@ -7,8 +7,8 @@
         android:shortcutShortLabel="@string/shortcut_server_short"
         android:shortcutLongLabel="@string/shortcut_server_long">
         <intent
-            android:action="com.zmilojevic.agentcommandcenter.SETTINGS"
-            android:targetPackage="com.zmilojevic.agentcommandcenter"
-            android:targetClass="com.zmilojevic.agentcommandcenter.MainActivity" />
+            android:action="com.zmilojevic.hearth.SETTINGS"
+            android:targetPackage="com.zmilojevic.hearth"
+            android:targetClass="com.zmilojevic.hearth.MainActivity" />
     </shortcut>
 </shortcuts>

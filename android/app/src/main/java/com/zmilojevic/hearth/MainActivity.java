@@ -1,4 +1,4 @@
-package com.zmilojevic.agentcommandcenter;
+package com.zmilojevic.hearth;
 
 import android.app.Activity;
 import android.content.ActivityNotFoundException;
@@ -34,7 +34,7 @@ import android.widget.TextView;
 
 public class MainActivity extends Activity {
     private static final String DEFAULT_URL = "http://192.168.1.7:47615/";
-    private static final String ACTION_SETTINGS = "com.zmilojevic.agentcommandcenter.SETTINGS";
+    private static final String ACTION_SETTINGS = "com.zmilojevic.hearth.SETTINGS";
     private static final int REQ_FILE = 1;
     private static final int BG = Color.parseColor("#1b1a17");
     private static final int FG = Color.parseColor("#d8d4cc");
@@ -254,7 +254,7 @@ public class MainActivity extends Activity {
         settings.setVisibility(View.GONE);
 
         TextView title = new TextView(this);
-        title.setText("Agent Command Center");
+        title.setText("Hearth");
         title.setTextColor(FG);
         title.setTextSize(20);
         title.setTypeface(Typeface.DEFAULT_BOLD);

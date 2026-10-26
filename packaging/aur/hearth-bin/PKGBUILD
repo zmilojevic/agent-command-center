@@ -1,0 +1,48 @@
+# Maintainer: Zeljko Milojevic <zmilojevic@users.noreply.github.com>
+pkgname=hearth-bin
+_name=hearth
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Desktop app for Claude Code sessions, built on the Claude Agent SDK (prebuilt release)'
+arch=('x86_64')
+url='https://github.com/zmilojevic/hearth'
+license=('MIT')
+depends=('alsa-lib' 'at-spi2-core' 'gtk3' 'libdrm' 'libnotify' 'libsecret'
+         'libxkbcommon' 'libxss' 'libxtst' 'mesa' 'nss' 'util-linux-libs' 'xdg-utils')
+optdepends=('git: changes panel and worktree chats'
+            'libappindicator-gtk3: tray icon on some desktops')
+provides=("$_name")
+conflicts=("$_name")
+options=('!strip' '!debug')
+_deb="$_name-$pkgver-linux-amd64.deb"
+source=("$_deb::$url/releases/download/v$pkgver/$_deb"
+        "LICENSE-$pkgver::https://raw.githubusercontent.com/zmilojevic/hearth/v$pkgver/LICENSE")
+noextract=("$_deb")
+sha256sums=('0000000000000000000000000000000000000000000000000000000000000000'
+            '0000000000000000000000000000000000000000000000000000000000000000')
+
+prepare() {
+  mkdir -p deb
+  bsdtar -xf "$_deb" -C deb
+}
+
+package() {
+  bsdtar -xf deb/data.tar.* -C deb --no-same-owner
+  local src="deb/opt/Hearth"
+
+  install -dm755 "$pkgdir/opt/$_name"
+  cp -a "$src/." "$pkgdir/opt/$_name/"
+  # Upstream's postinst sets the SUID bit; pacman does not run it.
+  chmod 4755 "$pkgdir/opt/$_name/chrome-sandbox"
+
+  install -dm755 "$pkgdir/usr/bin"
+  ln -s "/opt/$_name/$_name" "$pkgdir/usr/bin/$_name"
+
+  install -Dm644 "deb/usr/share/applications/$_name.desktop" \
+    "$pkgdir/usr/share/applications/$_name.desktop"
+  sed -i "s|^Exec=.*|Exec=$_name %U|" "$pkgdir/usr/share/applications/$_name.desktop"
+
+  cp -a deb/usr/share/icons "$pkgdir/usr/share/icons"
+
+  install -Dm644 "LICENSE-$pkgver" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

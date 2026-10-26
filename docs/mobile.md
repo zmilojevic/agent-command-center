@@ -14,7 +14,7 @@ Remote Control (claude.ai) is not involved.
 - The APK (`android/`) is a plain Java WebView shell (no Capacitor, no AndroidX). It loads the UI from the desktop's
   URL (default `http://192.168.1.7:47615/`, editable on a load error or via the "Server address" launcher shortcut) and
   pairs once like the browser does (the token lives in the WebView's localStorage). Build: `scripts/build-apk.sh` →
-  `~/Downloads/agent-command-center.apk` (debug-signed with `~/.android/debug.keystore`; updates must use the same key).
+  `~/Downloads/hearth.apk` (debug-signed with `~/.android/debug.keystore`; updates must use the same key).
   A foreground service for notifications is a later step.
 
 ## Channels

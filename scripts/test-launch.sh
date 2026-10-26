@@ -4,7 +4,7 @@ PORT=${1:-9334}
 PROFILE=${2:-/tmp/ccd-test/profile}
 REPO=$(cd "$(dirname "$0")/.." && pwd)
 
-WS=$(hyprctl clients -j | jq -r '[.[] | select(.class=="agent-command-center" and (.title|startswith("CCD-TEST")|not))][0].workspace.id // empty')
+WS=$(hyprctl clients -j | jq -r '[.[] | select(.class=="hearth" and (.title|startswith("CCD-TEST")|not))][0].workspace.id // empty')
 [ -n "$WS" ] || WS=$(hyprctl activeworkspace -j | jq -r '.id')
 
 # hl.window_rule registers the rule as a side effect; the "expected a dispatcher" message is expected.

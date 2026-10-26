@@ -48,7 +48,7 @@ export default function TopBar() {
             <ChevronLeft size={22} />
           </button>
         )}
-        <span className="phone-title">{chat ? chat.title : 'Agent Command Center'}</span>
+        <span className="phone-title">{chat ? chat.title : 'Hearth'}</span>
         {chat && <ContextMeter chat={chat} />}
         <SettingsPopover />
       </header>

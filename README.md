@@ -1,151 +1,149 @@
-# Agent Command Center
+# Hearth
 
-A desktop GUI for [Claude Code](https://docs.claude.com/en/docs/claude-code) sessions, modelled on the
-Claude Code tab of the Claude desktop app. It runs on Linux (Wayland or X11) with Electron and talks to
-Claude Code through the Claude Agent SDK, so it uses your existing Claude Code login and settings.
+**Keep your Claude Code sessions warm.** A desktop app for [Claude Code](https://docs.claude.com/en/docs/claude-code), built for Linux first (macOS and Windows builds too).
+It runs on the Claude Agent SDK and your existing Claude Code login: no API key, same subscription, same
+settings, same sessions as the CLI.
 
-What it does:
+![Hearth: sessions sidebar, a chat with tool cards and the git changes panel](docs/screenshots/main-dark.png)
 
-- Lists every Claude Code session on the machine (`~/.claude/projects`), grouped by project folder, with search.
-  The list refreshes by itself when sessions change on disk.
-- Opens a session with its full transcript and continues it, or forks it into a new chat.
-- Starts new chats in any folder, with a chosen model and permission mode.
-- Streams replies as they are written: Markdown with code highlighting, thinking summaries, and tool cards
-  (Bash command and output, Edit diffs, Write content, todo lists, and so on).
-- Asks before tools run, as the CLI does: Allow once, Always allow (saved to `.claude/settings.local.json`),
-  or Deny with an optional note telling Claude what to do instead. `AskUserQuestion` gets its own question card.
-- Switches model and permission mode mid-session, stops a running turn, and keeps several chats open at once.
-  Open chats are switched from the sidebar (there is no tab strip); right-click or middle-click a row to close it.
-- Renames and deletes sessions from the sidebar's right-click menu.
-- Slash commands: typing `/` opens a picker with the session's commands (from the CLI, with argument hints
-  and descriptions). Commands go to the CLI as typed; local command output (`/cost`, `/context`, …) appears as
-  a muted block. `/clear` is handled by the app and starts a fresh session.
-- Images in prompts: paste, drop or attach images; they show as thumbnails above the message, are downscaled
-  to 2000 px (JPEG) when larger, and open full size when clicked, also in stored transcripts.
-- Subagents: each Agent/Task call is listed under its session in the sidebar while the chat is open (busy or
-  done, description, current tool, elapsed time), and its tool card shows what the subagent is doing and how
-  many tool calls it made.
-- Context meter in the top bar (used / window, percentage); hovering shows the breakdown by category, the
-  auto-compact threshold and a Compact button. The sidebar's first chip shows the context used per session.
-- Message queue: Enter while Claude works queues the message; queued messages show above the composer, can be
-  removed or sent at once ("Send now" folds them into the running turn), and go out one per finished turn.
-- Desktop notifications when a turn ends or Claude asks for permission or has a question, unless that chat
-  is in view; clicking one brings the window up on that chat. Toggle in the gear menu.
-- Find in chat (Ctrl+F) with highlighted matches.
+> Unofficial community project, not affiliated with or endorsed by Anthropic.
 
-## Requirements
+## Why
 
-- The Claude Code CLI, installed and logged in (`claude` works in a terminal). No API key is needed;
-  the app uses the same subscription login.
-- Node.js 20 or newer and pnpm.
+Claude Code's desktop tab only exists in the Claude desktop app, which has no official Linux build. This app gives you
+that experience on Linux, plus a few things aimed at people who keep many sessions going at once:
 
-## Install and run
+- **Every session on the machine in one sidebar**, grouped by project, with the context used, how long the prompt
+  cache stays warm, model and effort, and git branch at a glance. Busy, finished-unseen and waiting-for-you dots.
+- **Keep the prompt cache warm** for chats you'll come back to, and a warning before you send into a cold cache
+  (with a one-click "clear context & send").
+- **Review and steer changes without leaving the chat**: git changes panel with syntax-highlighted unified or
+  side-by-side diffs, stage / discard per file or hunk, and line comments that go back to Claude as one message.
+- **Built-in terminal** per project, worktree chats, background task pills, and a live view of each subagent.
+- **Continue from your phone**: Remote Control (claude.ai/code and the Claude mobile app), or the companion
+  Android app over your LAN / Tailscale.
+
+## Features
+
+- **Sessions**: lists everything in `~/.claude/projects`, refreshes live, search, time window, pin / rename /
+  reorder projects, per-project default model and effort. Resume, fork, `/clear` in place, delete.
+- **Chat**: streaming Markdown with highlighted code, thinking summaries, tool cards (Bash output, Edit diffs,
+  Write content, todos, web search sources), images by paste or drop, message queue while Claude works, find
+  in chat, prompt history.
+- **Control**: permission, question and plan cards (`AskUserQuestion`, plan mode with Shift+Tab), model / effort /
+  permission mode per session, `/` command picker, `@` picker for files and subagents, stop, move a running
+  command to the background.
+- **Context and usage**: context meter by category with Compact, per-turn token and cache stats, plan rate limits
+  (5-hour and weekly) in the top bar.
+- **Projects**: git changes panel, integrated terminal (Ctrl+`), worktree chats (`.claude/worktrees/<name>`),
+  open in your editor or terminal, MCP server status with enable / reconnect.
+- **General chats**: claude.ai-style chats with web search and fetch, no project folder needed.
+- **Workflow designer**: visual editor for Claude Code saved workflows (`.claude/workflows/*.js`), see
+  [docs/workflows.md](docs/workflows.md).
+- **Phone**: Remote Control per chat, and a paired Android companion that shares the desktop's live sessions
+  ([docs/mobile.md](docs/mobile.md)).
+- **Desktop**: notifications when a turn ends or Claude needs you, tray icon (closing hides to tray), light / dark /
+  system theme, keyboard-driven sidebar.
+
+![Light theme with the context window breakdown](docs/screenshots/context-light.png)
+
+## Install
+
+You need the Claude Code CLI logged in once (`claude` works in a terminal). The app brings its own copy of the
+Claude Code binary through the Agent SDK.
+
+Download a build from [Releases](https://github.com/zmilojevic/hearth/releases):
+
+- **Arch / Manjaro / CachyOS**: `yay -S hearth-bin` (or any AUR helper).
+- **Linux AppImage**: `chmod +x hearth-*.AppImage && ./hearth-*.AppImage`
+- **Debian / Ubuntu**: `sudo apt install ./hearth-*.deb`
+- **macOS (Apple silicon)**: open the dmg and drag the app to Applications. Unsigned builds are blocked by
+  Gatekeeper: run `xattr -cr "/Applications/Hearth.app"` once (or System Settings → Privacy &
+  Security → "Open Anyway" after the first blocked launch).
+- **Windows**: run the installer; for an unsigned build SmartScreen asks for "More info" → "Run anyway". Install
+  Git for Windows as well, since Claude Code's Bash tool uses Git Bash.
+- **Android companion**: `hearth-android` APK from the same release; pair it from the gear menu →
+  "Phone access".
+
+**macOS and Windows testers wanted.** Those builds are produced by CI but the author only runs Linux; please open
+an issue with whatever breaks.
+
+## Build from source
+
+Node.js 20+, pnpm, and a C++ toolchain (`node-pty` is rebuilt for Electron on install).
 
 ```sh
-pnpm install          # installs Electron and the Agent SDK (with its native CLI binary)
+pnpm install          # Electron, the Agent SDK (with its native CLI binary), rebuilds node-pty
 pnpm dev              # dev server with hot reload
-pnpm build            # production build into out/
-pnpm typecheck        # TypeScript checks for main, preload and renderer
+pnpm typecheck && pnpm build
+node_modules/.bin/electron .   # run the built app from out/
 ```
 
-After `pnpm build`, start the built app with:
+To launch it from your desktop, put a launcher on your PATH:
 
 ```sh
-node_modules/.bin/electron .
-```
-
-or install the launcher once:
-
-```sh
-cat > ~/.local/bin/agent-command-center <<'SH'
+cat > ~/.local/bin/hearth <<'SH'
 #!/bin/sh
-exec /path/to/agent-command-center/node_modules/.bin/electron /path/to/agent-command-center "$@"
+exec /path/to/hearth/node_modules/.bin/electron /path/to/hearth "$@"
 SH
-chmod +x ~/.local/bin/agent-command-center
+chmod +x ~/.local/bin/hearth
 ```
 
-A matching desktop entry (`~/.local/share/applications/agent-command-center.desktop`) uses
-`Exec=agent-command-center`, `Icon=<repo>/resources/icon.svg` and `StartupWMClass=agent-command-center`.
-The launcher runs whatever is in `out/`, so run `pnpm build` again after pulling changes.
+and a desktop entry with `Exec=hearth`, `Icon=<repo>/resources/icon.svg` and
+`StartupWMClass=hearth`. The launcher runs whatever is in `out/`, so run `pnpm build` after pulling.
 
-## Install a packaged build
+### Packaging
 
-Packaged builds for Linux (AppImage, deb), macOS (Apple silicon, dmg/zip) and Windows (NSIS installer) come
-from the `Build` GitHub Actions workflow: download them from the run's artifacts, or from the draft release
-that a `v*` tag push creates. They are unsigned unless signing secrets are configured (below). You still need
-the Claude Code CLI login (see Requirements).
+`pnpm dist:linux`, `pnpm dist:mac` or `pnpm dist:win` on the matching OS (each needs its own native binaries);
+output goes to `dist/`. The `Build` GitHub Actions workflow builds all three plus the Android APK on every push to
+`main`, and a `v*` tag also creates a draft release. The AUR package lives in
+[packaging/aur](packaging/aur/README.md). Icons are generated from `resources/icon.svg` by `scripts/make-icons.sh`.
 
-- Linux: `chmod +x agent-command-center-*.AppImage && ./agent-command-center-*.AppImage`, or `sudo apt install ./agent-command-center-*.deb`.
-- macOS: open the dmg and drag the app to Applications. An unsigned build is blocked by Gatekeeper: run
-  `xattr -cr "/Applications/Agent Command Center.app"` once (or, after the first blocked launch, System Settings → Privacy & Security → "Open Anyway"; right-click → Open no longer works since macOS 15).
-- Windows: run the installer. SmartScreen may warn for an unsigned build: "More info" then "Run anyway".
-  Install Git for Windows as well; Claude Code's Bash tool uses Git Bash.
-
-Build locally on the matching OS (each platform needs its own native binaries): `pnpm dist:linux`,
-`pnpm dist:mac` or `pnpm dist:win`; output goes to `dist/`. Icons are generated from `resources/icon.svg` by
-`scripts/make-icons.sh` (needs `rsvg-convert` and ImageMagick); the outputs are committed.
-`pnpm dist:mac -c.mac.identity=-` ad-hoc signs a local build.
-
-Signing in CI: add repository secrets. macOS: `CSC_LINK` (base64 .p12 of a Developer ID Application certificate),
-`CSC_KEY_PASSWORD`, plus `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID` for notarization.
-Windows: `WIN_CSC_LINK`, `WIN_CSC_KEY_PASSWORD`. Without them the workflow builds unsigned (macOS ad-hoc signed).
+Signing in CI is optional, via repository secrets. macOS: `CSC_LINK` (base64 .p12 of a Developer ID Application
+certificate), `CSC_KEY_PASSWORD`, plus `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID` for
+notarization. Windows: `WIN_CSC_LINK`, `WIN_CSC_KEY_PASSWORD`. Android: `ANDROID_KEYSTORE_BASE64`,
+`ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`. Without them builds are unsigned
+(macOS ad-hoc signed, Android debug-signed).
 
 ## Keyboard shortcuts
 
+On macOS, Ctrl is ⌘.
+
 | Keys | Action |
 | --- | --- |
-| Ctrl+N | New chat |
-| Ctrl+W | Close the current chat |
-| Ctrl+F | Find in chat (Enter next, Shift+Enter previous, Esc closes) |
-| Enter | Send the message, or queue it while Claude is working |
-| Shift+Enter | New line in the message |
-| `/` | Command picker: Up/Down to move, Tab or Enter to complete, Esc to close |
-| Ctrl+V | Paste an image from the clipboard into the message |
-| Middle-click a sidebar row | Close that chat |
-| Esc | Close the new-chat dialog, rename dialog, context menu, find bar or image overlay |
+| Ctrl+N | New general chat |
+| Ctrl+Tab / Ctrl+Shift+Tab | Next / previous chat in the sidebar |
+| Up / Down, Left / Right, Enter | Move through the sidebar, collapse / expand projects, open a chat |
+| `/` (outside a text field) | Search sessions |
+| Enter / Shift+Enter | Send (or queue while Claude works) / new line |
+| Esc | Stop the running turn; close dialogs, pickers and the find bar |
+| Shift+Tab | Toggle plan mode |
+| `/`, `@` in the composer | Command picker, file and subagent picker |
+| Ctrl+K, Ctrl+L, Alt+Delete | `/clear` (fresh session in the same row) |
+| Ctrl+W | Delete the active chat's transcript (closes it if it has none) |
+| Ctrl+B | Move running foreground commands to the background |
+| Ctrl+Shift+G | Changes panel |
+| Ctrl+` | Terminal |
+| Ctrl+F | Find in chat |
+| Ctrl+Q | Quit (closing the window hides it to the tray) |
 
 ## Architecture
 
-Electron 45, electron-vite, React 19, TypeScript, ESM throughout.
+Electron 45, electron-vite, React 19, TypeScript (ESM), zustand. The main process runs one Agent SDK `query()` per
+open chat in streaming-input mode, so the Claude Code process lives across turns, and forwards every SDK message
+to the renderer, which reduces them into the chat view. [CLAUDE.md](CLAUDE.md) has the detailed map of the code
+and the SDK behaviour it relies on.
 
-- `src/main/index.ts`: the window (frameless, the title bar is drawn by the renderer), IPC handlers for
-  sessions (`listSessions`, `getSessionMessages`, `renameSession`, `deleteSession` from the SDK), chats,
-  the folder picker and window controls, and a chokidar watcher on `~/.claude/projects` that tells the
-  renderer to reload the session list.
-- `src/main/agent.ts`: `ChatRunner`, one SDK `query()` per open chat in streaming-input mode, so the CLI
-  process stays alive across turns. It passes the cwd, model, permission mode and resume/fork options,
-  bridges `canUseTool` to the renderer (`permission:request`, answered by `chat:respond`), and forwards
-  every SDK message as `agent:event`. Each runner has a generation number (returned by `chat:start` and sent
-  with its events) so events of a replaced runner are ignored; a deliberate close sends no `chat:exit`.
-  `chat:commands` returns `supportedCommands()`, `chat:context` pushes `getContextUsage()` with its categories,
-  and `app:notify` shows a native notification (click sends `notification:click`). Thinking is requested as summaries (`--thinking-display summarized`).
-- `src/preload/index.ts`: exposes `window.desktop` (typed as `DesktopApi` in `src/shared/types.ts`).
-- `src/renderer/src/reduce.ts`: a pure reducer that turns live SDK messages (stream deltas, assistant
-  frames, tool results, results, system messages) and stored transcripts into the chat model the UI renders.
-- `src/renderer/src/store.ts`: zustand + immer store for sessions, open chats, tabs, pending permission
-  requests and drafts.
-- `src/renderer/src/images.ts`: reads, downscales and base64-encodes image attachments.
-- `src/renderer/src/components/`: `Sidebar`, `TopBar`, `ContextMeter`, `SettingsPopover`, `ChatView`, `FindBar`,
-  `MessageItem`, `ImageThumb`, `ToolCard`, `DiffView`, `PermissionCard`, `QuestionCard`, `Markdown`, `Composer`,
-  `NewSessionDialog`, `Welcome`.
-- `scripts/dev-launch.sh`: starts the app (`prod`, the default, or `dev`) with remote debugging on port 9333.
-  On Hyprland it places the window on a given workspace without taking focus (`CCD_WORKSPACE`, default 7);
-  `scripts/dev-launch.sh stop` stops it again.
-- `scripts/ui-driver.mjs`: puppeteer-core scenarios against the running app (`newchat`, `resume`, `ask`,
-  `deny`, `stop`, `switch`, `fork`, `rename`, `prompt`, `eval`, `shot`), saving screenshots to `CCD_SHOTS`.
-
-Debugging: set `CCD_LOG_EVENTS=1` to log every raw SDK message (truncated) to the main process's stderr.
-The renderer store is available in DevTools as `window.__ccd.getState()`.
+Debugging: `CCD_LOG_EVENTS=1` logs every raw SDK message to stderr; the store is `window.__ccd.getState()` in
+DevTools (Ctrl+Shift+I).
 
 ## Known limitations
 
-- No auto-update; packaged builds are unsigned by default, and the macOS and Windows ones have not been tested by the author.
-- Subagents are tracked only for chats opened in the app; a resumed transcript does not list earlier ones.
-- There are no file `@` mentions.
-- Output of local slash commands is not part of the stored transcript, so it is gone after reopening a session.
-- Thinking text appears only where the model and account return thinking summaries.
-- The session list shows sessions that have a recorded working directory; resuming a session whose
-  folder no longer exists shows an error instead of starting.
-- The per-turn cost is derived from the SDK's cumulative `total_cost_usd`; an interrupted turn's partial
-  output is not included in it.
-- Queued messages cannot be edited, only removed or sent at once, and the queue is not saved across restarts.
+- No auto-update; builds are unsigned unless you configure signing; macOS is Apple silicon only.
+- Subagents are tracked only for chats opened in the app, not reconstructed from old transcripts.
+- No rewind.
+- Output of local slash commands (`/context`, `/usage`, …) is not part of the stored transcript.
+
+## License
+
+[MIT](LICENSE)

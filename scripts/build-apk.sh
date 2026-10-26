@@ -12,7 +12,7 @@ export PATH="$JAVA_HOME/bin:$PATH"
 echo "sdk.dir=$ANDROID_HOME" > local.properties
 ./gradlew assembleDebug
 
-out="$HOME/Downloads/agent-command-center.apk"
+out="$HOME/Downloads/hearth.apk"
 mkdir -p "$HOME/Downloads"
 cp app/build/outputs/apk/debug/app-debug.apk "$out"
 echo "$out"

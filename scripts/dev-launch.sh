@@ -11,9 +11,9 @@ MODE=${1:-prod}
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 LOG=${CCD_LOG:-/tmp/claude-1000/-home-zeljko/057c681b-9b2a-4cc8-a0ee-d83f47a9e044/scratchpad/app.log}
 WS=${CCD_WORKSPACE:-7}
-CLASS=agent-command-center
+CLASS=hearth
 
-PIDFILE=${XDG_RUNTIME_DIR:-/tmp}/agent-command-center-dev.pid
+PIDFILE=${XDG_RUNTIME_DIR:-/tmp}/hearth-dev.pid
 # Stop a dev server started earlier by this script, then any electron.
 if [ -f "$PIDFILE" ]; then kill "$(cat "$PIDFILE")" 2>/dev/null; rm -f "$PIDFILE"; fi
 pkill -x electron 2>/dev/null

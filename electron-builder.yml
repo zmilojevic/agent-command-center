@@ -1,5 +1,5 @@
-appId: com.zmilojevic.agent-command-center
-productName: Agent Command Center
+appId: com.zmilojevic.hearth
+productName: Hearth
 copyright: Copyright (c) Zeljko Milojevic
 directories:
   output: dist
@@ -23,14 +23,14 @@ linux:
       arch: x64
     - target: deb
       arch: x64
-  executableName: agent-command-center
+  executableName: hearth
   maintainer: Zeljko Milojevic <zmilojevic@users.noreply.github.com>
   category: Development
   icon: icon.png
   desktop:
     entry:
-      StartupWMClass: agent-command-center
-      Comment: Desktop GUI for Claude Code sessions
+      StartupWMClass: hearth
+      Comment: Desktop app for Claude Code sessions
 
 mac:
   target:

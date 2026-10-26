@@ -83,7 +83,7 @@ export function setupTray(deps: TrayDeps): Tray | null {
     log(`tray: unavailable: ${String(err)}`)
     return null
   }
-  tray.setToolTip('Agent Command Center')
+  tray.setToolTip('Hearth')
 
   const show = async (): Promise<BrowserWindow | null> => {
     let win = getWindow()

@@ -144,7 +144,7 @@ class RemoteBridge implements RemoteHooks {
       }
       if (!creds) {
         const model = this.info.model && this.info.model !== 'default' ? this.info.model : undefined
-        const created = await createCodeSession(BASE_URL, readAccessToken(), this.info.title || 'Agent Command Center', HTTP_TIMEOUT, undefined, undefined, this.info.cwd, model)
+        const created = await createCodeSession(BASE_URL, readAccessToken(), this.info.title || 'Hearth', HTTP_TIMEOUT, undefined, undefined, this.info.cwd, model)
         if (typeof created !== 'string') throw new Error(failureText(created, 'Creating the claude.ai session'))
         cse = created
         map[this.info.sessionId] = cse

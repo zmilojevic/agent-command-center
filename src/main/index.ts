@@ -20,13 +20,23 @@ import { CHATS_DIR } from './paths'
 import { setupTray, focusWindow } from './tray'
 import { workflowList, workflowRead, workflowSave, workflowDelete, workflowAgents } from './workflows'
 import { resourceFile } from './resources'
+import { migrateLegacyData } from './migrate'
 import { loadLoginShellEnv } from './shellEnv'
 import type { WorkflowSaveRequest } from '../shared/workflow'
 import type { StartChatOptions, PermissionResponse, PermissionMode, UserContent, NotifyRequest, Theme, RemoteEnableInfo } from '../shared/types'
 
-// Keep the profile in <appData>/agent-command-center: the packaged productName ("Agent Command Center") must not
+// Keep the profile in <appData>/hearth (see migrate.ts for the move from agent-command-center): the packaged productName ("Hearth") must not
 // move it (on Linux this is the same path as before). An explicit --user-data-dir (test copies) wins.
-if (!app.commandLine.hasSwitch('user-data-dir')) app.setPath('userData', join(app.getPath('appData'), 'agent-command-center'))
+if (!app.commandLine.hasSwitch('user-data-dir')) {
+  const { userData } = migrateLegacyData({
+    appData: app.getPath('appData'),
+    home: homedir(),
+    claudeDir: process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude'),
+    platform: process.platform,
+    log: (m) => console.log(m)
+  })
+  app.setPath('userData', userData)
+}
 
 // Wayland-native when available (Hyprland), X11 fallback otherwise.
 if (process.platform === 'linux') {
@@ -71,7 +81,7 @@ function createWindow(): void {
     ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 16, y: 17 } } : { frame: false }),
     show: false,
     backgroundColor: windowBg(),
-    title: process.env.CCD_WINDOW_TITLE || 'Agent Command Center',
+    title: process.env.CCD_WINDOW_TITLE || 'Hearth',
     webPreferences: {
       preload: join(import.meta.dirname, '../preload/index.mjs'),
       sandbox: false,
@@ -338,13 +348,13 @@ if (!process.env.ELECTRON_RENDERER_URL && !app.requestSingleInstanceLock()) {
   })
 
   app.whenReady().then(async () => {
-    if (process.platform === 'win32') app.setAppUserModelId('com.zmilojevic.agent-command-center')
+    if (process.platform === 'win32') app.setAppUserModelId('com.zmilojevic.hearth')
     if (process.platform === 'darwin') {
       await loadLoginShellEnv(log)
       Menu.setApplicationMenu(
         Menu.buildFromTemplate([
           {
-            label: 'Agent Command Center',
+            label: 'Hearth',
             submenu: [
               { role: 'about' },
               { type: 'separator' },
@@ -352,7 +362,7 @@ if (!process.env.ELECTRON_RENDERER_URL && !app.requestSingleInstanceLock()) {
               { role: 'hideOthers' },
               { role: 'unhide' },
               { type: 'separator' },
-              { label: 'Quit Agent Command Center', accelerator: 'Cmd+Q', click: quitApp },
+              { label: 'Quit Hearth', accelerator: 'Cmd+Q', click: quitApp },
             ],
           },
           { role: 'editMenu' },
@@ -361,7 +371,7 @@ if (!process.env.ELECTRON_RENDERER_URL && !app.requestSingleInstanceLock()) {
       )
     }
     // Notification daemons look up the app icon and name through the desktop entry.
-    if (process.platform === 'linux') app.setDesktopName('agent-command-center.desktop')
+    if (process.platform === 'linux') app.setDesktopName('hearth.desktop')
 
     createWindow()
     tray = setupTray({

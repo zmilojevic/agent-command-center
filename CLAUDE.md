@@ -1,12 +1,12 @@
-# Agent Command Center
+# Hearth
 
-Desktop GUI for Claude Code sessions, modelled on the Claude Code tab of Anthropic's Claude desktop app.
+Desktop GUI for Claude Code sessions (product name Hearth, package/window class `hearth`), modelled on the Claude Code tab of Anthropic's Claude desktop app.
 Electron 45 + electron-vite + React 19 + TypeScript (ESM throughout), pnpm. Backend is the Claude Agent SDK
 (`@anthropic-ai/claude-agent-sdk`, native linux-x64 binary), so it uses the user's existing Claude Code
 subscription login and settings; there is no API key anywhere.
 
 History: started 2026-10-24 as `~/src/claude-code-desktop`, renamed and moved to `~/dev/agent-command-center`
-the same day. It replaced the idea of tweaking the GTK `claude-session-manager` (upstream clone still at
+the same day. Renamed to Hearth on 2026-10-26 (repo folder stays `~/dev/agent-command-center`; GitHub repo `zmilojevic/hearth`). It replaced the idea of tweaking the GTK `claude-session-manager` (upstream clone still at
 `~/src/claude-session-manager`, unused).
 
 ## Models for work on this project
@@ -23,22 +23,22 @@ the same day. It replaced the idea of tweaking the GTK `claude-session-manager` 
 - `pnpm typecheck && pnpm build` – must be clean before handing anything back; `out/` is what the launcher runs,
   so rebuild after every change. A running instance keeps the old renderer until restarted; a Ctrl+R reload
   only swaps the renderer, not the main process.
-- Launcher: `~/.local/bin/agent-command-center` (execs `node_modules/.bin/electron <repo>`); menu entry
-  `~/.local/share/applications/agent-command-center.desktop` (StartupWMClass `agent-command-center`, icon
-  `resources/icon.svg`). Window class and `package.json` name are `agent-command-center`.
+- Launcher: `~/.local/bin/hearth` (execs `node_modules/.bin/electron <repo>`); menu entry
+  `~/.local/share/applications/hearth.desktop` (StartupWMClass `hearth`, icon
+  `resources/icon.svg`). Window class and `package.json` name are `hearth`.
 - pnpm 12 blocks build scripts by default and ignores `package.json` `pnpm.onlyBuiltDependencies`; the allowlist is `allowBuilds` in
   `pnpm-workspace.yaml` (electron, esbuild, node-pty allowed; electron-winstaller explicitly `false`). `node-pty` is native and must match
   Electron's ABI: `postinstall` / `pnpm rebuild:native` run `electron-rebuild -f -w node-pty` (needs a C++ toolchain); electron-vite keeps it
   external (`externalizeDepsPlugin`). Smoke test: `ELECTRON_RUN_AS_NODE=1 node_modules/.bin/electron -e "const p=require('node-pty');
   const t=p.spawn('/bin/sh',['-c','echo pty-ok'],{});t.onData(d=>process.stdout.write(d));t.onExit(()=>process.exit(0))"`.
-- Cross-platform packaging (added 2026-10-25): `electron-builder.yml` (productName "Agent Command Center" only there, never in
+- Cross-platform packaging (added 2026-10-25): `electron-builder.yml` (productName "Hearth" only there, never in
   package.json; `extraResources` = `resources/` → `<resourcesPath>/resources`; `asarUnpack` node-pty + `@anthropic-ai/claude-agent-sdk-*`;
   `npmRebuild: false`), `pnpm dist:linux|mac|win` (must run on that OS: node-pty and the SDK's per-platform optional binary).
   CI `.github/workflows/build.yml` (push to main or manual dispatch → artifacts; `v*` tag → also a draft release); unsigned unless repo secrets
   `CSC_LINK`/`CSC_KEY_PASSWORD`/`APPLE_*` (mac, notarized) or `WIN_CSC_LINK`/`WIN_CSC_KEY_PASSWORD` exist; unsigned mac = ad-hoc
-  (`-c.mac.identity=-`). The `android` job builds the APK too (artifact `agent-command-center-android`, attached to the release). Icons: `scripts/make-icons.sh` → `build/icon.png` (1024, mac padding), `build/icon.ico`,
+  (`-c.mac.identity=-`). The `android` job builds the APK too (artifact `hearth-android`, attached to the release). Icons: `scripts/make-icons.sh` → `build/icon.png` (1024, mac padding), `build/icon.ico`,
   `resources/trayTemplate{,@2x}.png` (mac menu bar). Local check: `pnpm exec electron-builder --linux dir` → `dist/linux-unpacked`.
-- Never `git commit` or push unless the user asks. Remote `origin` = `git@github.com:zmilojevic/agent-command-center.git`
+- Never `git commit` or push unless the user asks. Remote `origin` = `git@github.com:zmilojevic/hearth.git`
   (public), branch `main`.
 
 ## Layout
@@ -49,16 +49,17 @@ the same day. It replaced the idea of tweaking the GTK `claude-session-manager` 
   native notifications (`app:notify` → click sends `notification:click`) (icon: `/usr/share/icons/hicolor/256x256/apps/claude-desktop.png` if installed, else `resources/icon.png` rendered from `icon.svg`; without an icon the daemon shows a bell), `window:action`
   (minimize/maximize/close/reload/devtools).
 - Platforms: Linux is primary and its behaviour must not change; macOS/Windows support is code-complete but untested by the author.
-  Main: `userData` pinned to `<appData>/agent-command-center` (unless `--user-data-dir`); `resources.ts` `resourceFile()` (packaged →
+  Main: `userData` pinned to `<appData>/hearth` (unless `--user-data-dir`); `resources.ts` `resourceFile()` (packaged →
   `process.resourcesPath`); `claudeBin.ts` `claudeExecutable()` → `pathToClaudeCodeExecutable` for every `query()` when packaged (the SDK's
   resolved binary is inside app.asar, the spawnable copy in `app.asar.unpacked`); `shellEnv.ts` imports the login shell env on macOS
   (Finder launches get launchd's PATH; `CCD_SKIP_SHELL_ENV=1` skips); mac = `hiddenInset` title bar + traffic lights, minimal app menu
   (no Cmd+W/R/N/F accelerators – the renderer owns them), Dock `activate` re-shows the hidden window; Windows = AppUserModelId,
-  pwsh/powershell terminal; `CHATS_DIR` = `<appData>/agent-command-center/chats` off Linux; Remote Control reads the token from the
+  pwsh/powershell terminal; `CHATS_DIR` = `<appData>/hearth/chats` off Linux; Remote Control reads the token from the
   macOS Keychain (`security find-generic-password -s "Claude Code-credentials" -w`) before the file; `launch.ts` has per-platform
   editor/terminal defs (mac `.app` bundles via `open -a`, Windows PATHEXT and `.cmd` via `cmd.exe /d /s /c`); git paths go through
   `resolve()` (git prints `C:/…`). Renderer: `window.desktop.platform` → `<html data-platform>`, `styles/platform.css`, `isMac`/`isWin`
   and `modLabel()` (⌘ labels) in `util.ts`; path helpers accept `\` and drive letters.
+- Rename migration (`src/main/migrate.ts`, `migrateLegacyData`, pure node, never throws, no-op once done; called in `index.ts` before anything reads userData, skipped with `--user-data-dir`): if `<appData>/agent-command-center` is a real dir and `<appData>/hearth` does not exist, it renames it to `hearth` and leaves a symlink (junction on Windows) at the old name; on Linux it also moves `~/.local/share/agent-command-center/chats` to `~/.local/share/hearth/chats` (removing the old share dir when empty); then `rewriteTranscripts` rewrites the old chats path in every `.jsonl`/`.json` under `~/.claude/projects/<old slug>` (incl. subagent dirs) and moves that dir to the new slug (general-chat identity is `cwd === chatsDir`). If the legacy instance is running (`SingletonLock` pid alive) nothing is moved and the legacy dir is used. Internal prefixes keep the old initials on purpose: `CCD_*` env vars, `window.__ccd`, `ccd.*` localStorage keys, `ccd-workflow-graph` marker (and the workflow script header text "Generated by the Agent Command Center workflow designer", which is part of the graph hash).
 - `src/main/agent.ts` – `ChatRunner`: one SDK `query()` per open chat in **streaming-input mode** (prompt is a
   `PushQueue` async iterable, so the CLI process lives across turns). Options: cwd, permissionMode
   (+ `allowDangerouslySkipPermissions` when bypass), `includePartialMessages`, `systemPrompt` preset
@@ -70,7 +71,7 @@ the same day. It replaced the idea of tweaking the GTK `claude-session-manager` 
   (session-only, `null` = model default; start option `effort`, last pick remembered as `lastEffort`),
   `supportedCommands()` → `chat:commands`, `supportedAgents()` → `chat:agents`. `warmCache()` (`chat:warm`) → undocumented `askSideQuestion` (SDK `/btw`): reuses the main cache prefix, writes nothing to the transcript; false if the method is missing or it throws (90 s timeout).
 - General chats (claude.ai style, no project): an ordinary SDK session whose cwd is `CHATS_DIR`
-  (`src/main/paths.ts` = `~/.local/share/agent-command-center/chats`, created at startup, exposed as `chatsDir()` / `app:chatsDir`).
+  (`src/main/paths.ts` = `~/.local/share/hearth/chats`, created at startup, exposed as `chatsDir()` / `app:chatsDir`).
   Identity is purely `cwd === chatsDir`, so listing/resume/rename/delete/keep-warm/`/clear` work unchanged. `ChatRunner.start()` then
   passes `tools: ['WebSearch','WebFetch']`, `strictMcpConfig`, `settingSources: ['user']` and a custom system prompt
   (`chatSystemPrompt()`: general assistant, web tools, today's date) instead of the `claude_code` preset. Renderer: store `generalDir`
@@ -193,7 +194,7 @@ the same day. It replaced the idea of tweaking the GTK `claude-session-manager` 
   phone lists the same chats; `prefs.set` mirrors them there, `syncSharedPrefs()` runs before `loadSessions` (desktop seeds missing keys, the phone never
   does) and on phone reconnect; only the desktop prunes hiddenSessions/sessionSortTime. collapsedProjects stays per device.
   Android APK: `android/` (Java WebView shell, AGP 9.4.1 / Gradle 9.8.2 wrapper, minSdk 30, target 36), built by `scripts/build-apk.sh`
-  (`JAVA_HOME=~/.local/share/jdk-21`, `ANDROID_HOME=~/Android/Sdk`; system JDK 27 is too new for Gradle) → `~/Downloads/agent-command-center.apk`. CI: `android` job in build.yml, artifact `agent-command-center-android`, release-signed when secrets `ANDROID_KEYSTORE_BASE64`/`ANDROID_KEYSTORE_PASSWORD`/`ANDROID_KEY_ALIAS`/`ANDROID_KEY_PASSWORD` exist (build.gradle reads `ANDROID_KEYSTORE_FILE` etc.), else debug-signed with a per-run key.
+  (`JAVA_HOME=~/.local/share/jdk-21`, `ANDROID_HOME=~/Android/Sdk`; system JDK 27 is too new for Gradle) → `~/Downloads/hearth.apk`. CI: `android` job in build.yml, artifact `hearth-android`, release-signed when secrets `ANDROID_KEYSTORE_BASE64`/`ANDROID_KEYSTORE_PASSWORD`/`ANDROID_KEY_ALIAS`/`ANDROID_KEY_PASSWORD` exist (build.gradle reads `ANDROID_KEYSTORE_FILE` etc.), else debug-signed with a per-run key.
   Phone UI = second renderer entry `mobile.html` -> `src/renderer/src/mobile/entry.ts` (pairing screen, token in localStorage `ccd.mobile.token`) installs `window.desktop` from `shim.ts` and only then `import('../main')`. App code must never import `mobile/shim` (it would split the shim into a chunk that pulls in the main chunk and runs it before `window.desktop` exists; use `window.desktop.connectionState`/`onConnectionState`). The page is served over plain http, an insecure context: `crypto.randomUUID` is polyfilled in `entry.ts`, use `copyText` (util.ts) instead of `navigator.clipboard`. `isPhone` (util.ts) switches off keep-warm, Remote Control, terminals, changes panel, notifications, folder/editor actions, composer autofocus; layout in `styles/phone.css` under `[data-client="mobile"]`. `scripts/mobile-smoke.mjs <url> <code>` checks pairing, auth, allowlist and that the mobile entry does not import the desktop chunk.
 
 ## SDK facts learned the hard way
@@ -299,7 +300,7 @@ the same day. It replaced the idea of tweaking the GTK `claude-session-manager` 
 
 - The user usually has the app running (and sometimes a fullscreen game on the focused monitor). **Never
   `pkill -x electron` or run `scripts/dev-launch.sh` while their instance is up** (both kill every electron).
-  Check first: `hyprctl clients -j | jq '.[] | select(.class=="agent-command-center")'`.
+  Check first: `hyprctl clients -j | jq '.[] | select(.class=="hearth")'`.
 - Start an isolated copy with `scripts/test-launch.sh [port] [profile-dir]` (defaults 9334, `/tmp/ccd-test/profile`;
   own localStorage). It registers a Hyprland window rule so the test window opens silently on the main window's
   workspace with no initial focus (the user's explicit wish), launches electron with `CCD_WINDOW_TITLE=CCD-TEST`

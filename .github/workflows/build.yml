@@ -84,7 +84,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: agent-command-center-${{ matrix.target }}
+          name: hearth-${{ matrix.target }}
           if-no-files-found: error
           path: |
             dist/*.AppImage
@@ -127,17 +127,17 @@ jobs:
             echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
             export ANDROID_KEYSTORE_FILE="$RUNNER_TEMP/release.jks"
             ./gradlew assembleRelease
-            cp app/build/outputs/apk/release/app-release.apk ../dist/agent-command-center-android.apk
+            cp app/build/outputs/apk/release/app-release.apk ../dist/hearth-android.apk
           else
             ./gradlew assembleDebug
-            cp app/build/outputs/apk/debug/app-debug.apk ../dist/agent-command-center-android.apk
+            cp app/build/outputs/apk/debug/app-debug.apk ../dist/hearth-android.apk
           fi
 
       - uses: actions/upload-artifact@v4
         with:
-          name: agent-command-center-android
+          name: hearth-android
           if-no-files-found: error
-          path: dist/agent-command-center-android.apk
+          path: dist/hearth-android.apk
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')

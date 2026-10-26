@@ -3,11 +3,11 @@ plugins {
 }
 
 android {
-    namespace 'com.zmilojevic.agentcommandcenter'
+    namespace 'com.zmilojevic.hearth'
     compileSdk 36
 
     defaultConfig {
-        applicationId 'com.zmilojevic.agentcommandcenter'
+        applicationId 'com.zmilojevic.hearth'
         minSdk 30
         targetSdk 36
         versionCode 1
