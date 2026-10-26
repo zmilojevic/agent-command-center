@@ -315,7 +315,7 @@ export interface DesktopApi {
   getUsage(force?: boolean): Promise<PlanUsage | null>
   /** Uncommitted changes (diff against HEAD plus untracked files) of the repo containing cwd. */
   gitChanges(cwd: string): Promise<GitChanges>
-  notify(n: NotifyRequest): Promise<void>
+  notify(n: NotifyRequest): Promise<boolean>
   pickFolder(defaultPath?: string): Promise<string | null>
   openPath(path: string): Promise<void>
   homeDir(): Promise<string>

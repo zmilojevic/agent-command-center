@@ -42,7 +42,7 @@ that experience on Linux, plus a few things aimed at people who keep many sessio
   [docs/workflows.md](docs/workflows.md).
 - **Phone**: Remote Control per chat, and a paired Android companion that shares the desktop's live sessions
   ([docs/mobile.md](docs/mobile.md)).
-- **Desktop**: notifications when a turn ends or Claude needs you, tray icon (closing hides to tray), light / dark /
+- **Desktop**: notifications (with its own chime) when a turn ends or Claude needs you, tray icon (closing hides to tray), light / dark /
   system theme, keyboard-driven sidebar.
 
 ![Light theme with the context window breakdown](docs/screenshots/context-light.png)

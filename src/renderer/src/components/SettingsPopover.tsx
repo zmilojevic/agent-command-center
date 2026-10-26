@@ -4,6 +4,7 @@ import { Settings, X } from 'lucide-react'
 import { renderSVG } from 'uqr'
 import { useStore } from '../store'
 import Dropdown from './Dropdown'
+import { playChime } from '../sound'
 import { relativeTime, isPhone } from '../util'
 import type { Theme, LaunchTools, MobileStatus, PairInfo } from '@shared/types'
 
@@ -97,6 +98,8 @@ function PairDialog({ onClose }: { onClose: () => void }) {
 export default function SettingsPopover() {
   const notifications = useStore((s) => s.notifications)
   const setNotifications = useStore((s) => s.setNotifications)
+  const notifySound = useStore((s) => s.notifySound)
+  const setNotifySound = useStore((s) => s.setNotifySound)
   const theme = useStore((s) => s.theme)
   const setTheme = useStore((s) => s.setTheme)
   const editor = useStore((s) => s.editor)
@@ -194,6 +197,26 @@ export default function SettingsPopover() {
               <span className="knob" />
             </button>
           </label>
+          {notifications && (
+            <label className="toggle-row">
+              <span className="toggle-text">
+                <span>Notification sound</span>
+                <span className="muted small">Hearth's own chime instead of the system sound</span>
+              </span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={notifySound}
+                className={`switch ${notifySound ? 'on' : ''}`}
+                onClick={() => {
+                  setNotifySound(!notifySound)
+                  if (!notifySound) playChime('done')
+                }}
+              >
+                <span className="knob" />
+              </button>
+            </label>
+          )}
           <label className="toggle-row">
             <span className="toggle-text">
               <span>Phone access</span>

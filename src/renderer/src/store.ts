@@ -5,6 +5,7 @@ import { applySdkMessage, applyTranscript, emptyModel, findTool, type ChatModel,
 import type { WfGraph, WorkflowFile, WorkflowReadResult, WorkflowScope } from '../../shared/workflow'
 import type { ImageAttachment } from './images'
 import { basename, projectRoot, isPhone } from './util'
+import { playChime } from './sound'
 import { SHARED_PREFS } from '../../shared/channels'
 import { ensureTerminal, disposeTerminal, terminalExited, whenTerminalReady, pasteToTerminal, focusTerminal } from './terminals'
 
@@ -134,6 +135,7 @@ interface State {
   lastMode: PermissionMode
   lastCwd: string
   notifications: boolean
+  notifySound: boolean
   theme: Theme
   diffTint: DiffTint
   /** Preferred editor / terminal ids ('' = first detected; editor 'system' = OS handler). */
@@ -191,6 +193,7 @@ interface State {
   addAttachments(chatId: string, images: ImageAttachment[]): void
   removeAttachment(chatId: string, id: string): void
   setNotifications(v: boolean): void
+  setNotifySound(v: boolean): void
   setTheme(theme: Theme): void
   setDiffTint(v: DiffTint): void
   setFindOpen(v: boolean): void
@@ -377,6 +380,7 @@ export const useStore = create<State>()(
     lastMode: 'bypassPermissions' as PermissionMode,
     lastCwd: prefs.get('lastCwd', ''),
     notifications: prefs.get('notifications', true),
+    notifySound: prefs.get('notifySound', true),
     theme: prefs.get<Theme>('theme', 'system'),
     diffTint: prefs.get<DiffTint>('diffTint', 'row'),
     editor: prefs.get('editor', ''),
@@ -859,6 +863,13 @@ export const useStore = create<State>()(
       prefs.set('notifications', v)
       set((s) => {
         s.notifications = v
+      })
+    },
+
+    setNotifySound(v) {
+      prefs.set('notifySound', v)
+      set((s) => {
+        s.notifySound = v
       })
     },
 
@@ -1546,13 +1557,17 @@ function permissionText(req: PermissionRequest): string {
 }
 
 /** Notify only when the user can't see that chat right now. */
-function maybeNotify(chatId: string, body: string): void {
+function maybeNotify(chatId: string, body: string, kind: 'done' | 'attention'): void {
   const s = useStore.getState()
   if (isPhone || !s.notifications) return
   const c = s.chats[chatId]
   if (!c) return
   // Main checks window focus; an inactive chat is out of view either way.
-  void window.desktop.notify?.({ chatId, title: c.title || 'Claude Code', body: body || 'Claude finished', onlyIfUnfocused: s.activeChatId === chatId })
+  void window.desktop
+    .notify?.({ chatId, title: c.title || 'Claude Code', body: body || 'Claude finished', onlyIfUnfocused: s.activeChatId === chatId })
+    .then((shown) => {
+      if (shown && useStore.getState().notifySound) playChime(kind)
+    })
 }
 
 async function refreshModels(chatId: string): Promise<void> {
@@ -1686,7 +1701,7 @@ export function wireEvents(): void {
       void useStore.getState().sendMessage(chatId, next.text, next.images)
       return
     }
-    maybeNotify(chatId, clip120(lastAssistantText(c)))
+    maybeNotify(chatId, clip120(lastAssistantText(c)), 'done')
   })
   window.desktop.onPermissionRequest((req) => {
     if (!useStore.getState().chats[req.chatId]) return autoAttach(req.chatId)
@@ -1696,7 +1711,7 @@ export function wireEvents(): void {
       c.pending.push(req)
       if (s.activeChatId !== req.chatId || !document.hasFocus()) c.unread = true
     })
-    maybeNotify(req.chatId, permissionText(req))
+    maybeNotify(req.chatId, permissionText(req), 'attention')
   })
   window.desktop.onNotificationClick?.(({ chatId }) => {
     if (useStore.getState().chats[chatId]) useStore.getState().activate(chatId)

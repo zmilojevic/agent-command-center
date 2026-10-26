@@ -257,11 +257,11 @@ function notificationIcon(): Electron.NativeImage | undefined {
   return notifyIcon
 }
 handle('app:notify', (_ctx, n: NotifyRequest) => {
-  if (!Notification.isSupported()) return
+  if (!Notification.isSupported()) return false
   // The renderer's document.hasFocus() stays true on Wayland when the window is on
   // another workspace, so the window manager's view decides.
-  if (n.onlyIfUnfocused && win && !win.isDestroyed() && win.isFocused()) return
-  const notif = new Notification({ title: n.title, body: n.body, silent: false, icon: notificationIcon() })
+  if (n.onlyIfUnfocused && win && !win.isDestroyed() && win.isFocused()) return false
+  const notif = new Notification({ title: n.title, body: n.body, silent: true, icon: notificationIcon() })
   const drop = (): void => {
     liveNotifications.delete(notif)
   }
@@ -273,6 +273,7 @@ handle('app:notify', (_ctx, n: NotifyRequest) => {
   notif.on('close', drop)
   liveNotifications.add(notif)
   notif.show()
+  return true
 })
 
 // ---- IPC: misc -----------------------------------------------------------
