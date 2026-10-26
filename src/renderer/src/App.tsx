@@ -178,7 +178,12 @@ export default function App() {
         !e.defaultPrevented &&
         (e.target as Element | null)?.closest?.('section.changes')
       ) {
-        if (useStore.getState().changesOpen) toggleChanges()
+        const st = useStore.getState()
+        if (st.changesMax) {
+          st.setChangesMax(false)
+          return
+        }
+        if (st.changesOpen) toggleChanges()
         focusComposer()
       }
     }

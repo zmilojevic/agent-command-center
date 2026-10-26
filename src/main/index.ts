@@ -49,7 +49,6 @@ let mobileServer: MobileServer | null = null
 const emit = (channel: string, payload: unknown): void => {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload)
   mobileServer?.broadcast(channel, payload)
-  if (channel === 'agent:event' && (payload as { message?: { type?: string } })?.message?.type === 'result') usageService?.noteResult()
 }
 const log = (s: string): void => {
   process.stderr.write(`[claude] ${s}${s.endsWith('\n') ? '' : '\n'}`)

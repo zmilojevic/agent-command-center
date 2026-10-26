@@ -3,14 +3,14 @@
   position: relative;
   max-width: 1032px;
   margin: 0 auto 6px;
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 5px;
 }
 .task-pill {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  max-width: 280px;
+  min-width: 0;
   border: 1px solid var(--border);
   border-radius: 999px;
   background: var(--surface-2);
@@ -27,8 +27,10 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  flex: 1;
   min-width: 0;
   padding: 3px 10px;
+  text-align: left;
   background: none;
   border: none;
   color: inherit;
@@ -53,7 +55,9 @@
   color: var(--err);
 }
 .task-pill-text {
+  flex: 1;
   min-width: 0;
+  text-align: left;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

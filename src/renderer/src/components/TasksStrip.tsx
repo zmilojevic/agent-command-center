@@ -136,12 +136,28 @@ export default function TasksStrip({ chatId }: { chatId: string }) {
     }
   }, [openId])
 
+  const dismiss = (taskId: string): void => {
+    setDismissed((d) => new Set(d).add(taskId))
+    if (openId === taskId) setOpenId(null)
+  }
+
   if (!visible.length) return null
   return (
     <div className="tasks-strip" ref={root}>
       {openTask && <TaskPopover chatId={chatId} task={openTask} now={now} onClose={() => setOpenId(null)} />}
       {visible.map((t) => (
-        <div key={t.taskId} className={`task-pill ${live(t) ? 'running' : 'ended'} ${openId === t.taskId ? 'on' : ''}`}>
+        <div
+          key={t.taskId}
+          className={`task-pill ${live(t) ? 'running' : 'ended'} ${openId === t.taskId ? 'on' : ''}`}
+          onMouseDown={(e) => {
+            if (e.button === 1) e.preventDefault()
+          }}
+          onAuxClick={(e) => {
+            if (e.button !== 1) return
+            e.preventDefault()
+            if (!live(t)) dismiss(t.taskId)
+          }}
+        >
           <button className="task-pill-main" title={t.description} onClick={() => setOpenId(openId === t.taskId ? null : t.taskId)}>
             <span className="task-pill-type"><TypeIcon type={t.type} /></span>
             <span className="task-pill-text">{t.description || t.taskId}</span>
@@ -151,11 +167,8 @@ export default function TasksStrip({ chatId }: { chatId: string }) {
           {!live(t) && (
             <button
               className="task-pill-x"
-              title="Dismiss"
-              onClick={() => {
-                setDismissed((d) => new Set(d).add(t.taskId))
-                if (openId === t.taskId) setOpenId(null)
-              }}
+              title="Dismiss (middle-click)"
+              onClick={() => dismiss(t.taskId)}
             >
               <X size={11} />
             </button>

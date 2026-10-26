@@ -12,6 +12,7 @@ export default function RightDock({ children }: { children: ReactNode }) {
   const setWidth = useStore((s) => s.setChangesWidth)
   const split = useStore((s) => s.dockSplit)
   const setSplit = useStore((s) => s.setDockSplit)
+  const max = useStore((s) => s.changesMax && s.changesOpen)
   const dock = useRef<HTMLElement>(null)
   const [dragging, setDragging] = useState(false)
   const [splitDragging, setSplitDragging] = useState(false)
@@ -45,7 +46,8 @@ export default function RightDock({ children }: { children: ReactNode }) {
   }
 
   return (
-    <aside ref={dock} className="right-dock" style={{ '--cp-w': `${width}px` } as CSSProperties}>
+    <aside ref={dock} className={'right-dock' + (max ? ' max' : '')} style={{ '--cp-w': `${width}px` } as CSSProperties}>
+      {!max && (
       <div
         className={'cp-resize' + (dragging ? ' dragging' : '')}
         onPointerDown={(e) => capture(e, setDragging)}
@@ -54,6 +56,7 @@ export default function RightDock({ children }: { children: ReactNode }) {
         onPointerCancel={(e) => release(e, setDragging)}
         onDoubleClick={() => setWidth(520)}
       />
+      )}
       {panes.map((p, i) => (
         <div key={(p as { key?: string }).key ?? i} style={{ display: 'contents' }}>
           {i > 0 && (

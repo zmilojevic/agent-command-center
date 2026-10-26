@@ -64,7 +64,7 @@ export default function UsageMeter() {
     if (closeTimer.current) clearTimeout(closeTimer.current)
     if (!open) {
       setNow(Date.now())
-      if (!usage || Date.now() - usage.fetchedAt > 60_000) void window.desktop.getUsage(true).then((u) => u && setUsage(u))
+      if (!usage || Date.now() - usage.fetchedAt > 2 * 60_000) void window.desktop.getUsage(true).then((u) => u && setUsage(u))
     }
     setOpen(true)
   }

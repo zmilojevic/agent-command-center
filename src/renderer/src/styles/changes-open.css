@@ -123,3 +123,16 @@
   text-decoration: underline;
   text-underline-offset: 2px;
 }
+
+/* maximized Changes dock: covers the window below the 46 px title row, keeps the 44 px tool strip */
+.right-dock.max {
+  position: fixed;
+  top: 46px;
+  left: 0;
+  right: 44px;
+  bottom: 0;
+  width: auto;
+  min-width: 0;
+  z-index: 36;
+  border-left: 0;
+}

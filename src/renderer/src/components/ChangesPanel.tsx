@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { modLabel, isPhone } from '../util'
-import { RefreshCw, Columns2, Rows2, PanelLeft, AlignJustify, X, ChevronRight, Check, Minus, Undo2, ExternalLink } from 'lucide-react'
+import { Maximize2, Minimize2, RefreshCw, Columns2, Rows2, PanelLeft, AlignJustify, X, ChevronRight, Check, Minus, Undo2, ExternalLink } from 'lucide-react'
 import { useStore } from '../store'
 import type { ChangedFile } from '@shared/types'
 import UnifiedDiff from './UnifiedDiff'
@@ -69,6 +69,8 @@ export default function ChangesPanel({ chatId }: { chatId: string }) {
   const entry = useStore((s) => (s.chats[chatId] ? s.changes[s.chats[chatId].cwd] : undefined))
   const refreshChanges = useStore((s) => s.refreshChanges)
   const toggleChanges = useStore((s) => s.toggleChanges)
+  const changesMax = useStore((s) => s.changesMax)
+  const toggleChangesMax = useStore((s) => s.toggleChangesMax)
   const sendComments = useStore((s) => s.sendComments)
   const diffLayout = useStore((s) => s.diffLayout)
   const setDiffLayout = useStore((s) => s.setDiffLayout)
@@ -113,7 +115,13 @@ export default function ChangesPanel({ chatId }: { chatId: string }) {
 
   return (
     <section className="changes" tabIndex={-1}>
-      <div className="cp-head">
+      <div
+        className="cp-head"
+        onDoubleClick={(e) => {
+          if (isPhone || (e.target as Element).closest('button, .dd-trigger, .dd-menu')) return
+          toggleChangesMax()
+        }}
+      >
         <span className="cp-title">Changes</span>
         {files.length > 0 && (
           <span className="cp-sub">
@@ -141,6 +149,11 @@ export default function ChangesPanel({ chatId }: { chatId: string }) {
             onClick={() => setDiffLayout(diffLayout === 'split' ? 'unified' : 'split')}
           >
             {diffLayout === 'split' ? <Rows2 size={13} /> : <Columns2 size={13} />}
+          </button>
+        )}
+        {!isPhone && (
+          <button className="icon-btn tiny" title={changesMax ? 'Restore size' : 'Maximize'} onClick={toggleChangesMax}>
+            {changesMax ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
           </button>
         )}
         <button className="icon-btn tiny" title="Refresh" onClick={() => void refreshChanges(cwd)}>

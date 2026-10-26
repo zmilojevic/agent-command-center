@@ -60,11 +60,12 @@ export function normalizeUsage(res: unknown, now = Date.now()): PlanUsage {
   }
 }
 
+/** Plan usage is polled at this interval and never fetched more often. */
+const MIN_INTERVAL_MS = 2 * 60_000
+
 export class UsageService {
   private last: PlanUsage | null = null
   private inflight: Promise<PlanUsage | null> | null = null
-  private lastResultFetch = 0
-  private trailing: ReturnType<typeof setTimeout> | null = null
 
   constructor(
     private runners: RunnerRegistry,
@@ -74,30 +75,13 @@ export class UsageService {
 
   start(): void {
     void this.refresh()
-    setInterval(() => void this.refresh(), 5 * 60_000).unref?.()
+    setInterval(() => void this.refresh(), MIN_INTERVAL_MS).unref?.()
   }
 
-  /** Cached value; fetches when nothing is cached yet or when forced. */
+  /** Cached value; fetches only when nothing is cached yet, or when forced and the cache is >= MIN_INTERVAL_MS old. */
   get(force: boolean): Promise<PlanUsage | null> {
-    if (this.last && !force) return Promise.resolve(this.last)
-    return this.refresh()
-  }
-
-  /** Called after any chat's result; refresh at most once per 30 s (trailing call). */
-  noteResult(): void {
-    if (this.trailing) return
-    const wait = Math.max(0, this.lastResultFetch + 30_000 - Date.now())
-    if (wait === 0) {
-      this.lastResultFetch = Date.now()
-      void this.refresh()
-      return
-    }
-    this.trailing = setTimeout(() => {
-      this.trailing = null
-      this.lastResultFetch = Date.now()
-      void this.refresh()
-    }, wait)
-    this.trailing.unref?.()
+    if (!this.last || (force && Date.now() - this.last.fetchedAt >= MIN_INTERVAL_MS)) return this.refresh()
+    return Promise.resolve(this.last)
   }
 
   private refresh(): Promise<PlanUsage | null> {

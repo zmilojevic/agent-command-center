@@ -143,6 +143,8 @@ interface State {
   /** Git working-tree changes keyed by cwd. */
   changes: Record<string, ChangesEntry>
   changesOpen: boolean
+  /** Changes dock covers the window below the title row (not persisted). */
+  changesMax: boolean
   changesWidth: number
   diffLayout: 'unified' | 'split'
   /** Fraction of the right dock's height given to the top panel (Changes) when Changes and Terminal are both open. */
@@ -197,6 +199,8 @@ interface State {
   setSearch(q: string): void
   setRecentHours(h: number): void
   toggleChanges(): void
+  toggleChangesMax(): void
+  setChangesMax(v: boolean): void
   setChangesWidth(px: number): void
   setDiffLayout(l: 'unified' | 'split'): void
   setDockSplit(f: number): void
@@ -351,6 +355,7 @@ export const useStore = create<State>()(
     warmRetryAt: {},
     changes: {},
     changesOpen: prefs.get('changesOpen', false),
+    changesMax: false,
     changesWidth: prefs.get('changesWidth', 520),
     diffLayout: prefs.get<'unified' | 'split'>('diffLayout', 'unified'),
     dockSplit: prefs.get('dockSplit', 0.5),
@@ -975,10 +980,23 @@ export const useStore = create<State>()(
       if (active && isGeneral(active.cwd)) return
       set((s) => {
         s.changesOpen = !s.changesOpen
+        if (!s.changesOpen) s.changesMax = false
         prefs.set('changesOpen', s.changesOpen)
       })
       const c = get().activeChatId ? get().chats[get().activeChatId!] : undefined
       if (get().changesOpen && c) void get().refreshChanges(c.cwd)
+    },
+
+    toggleChangesMax() {
+      set((s) => {
+        s.changesMax = !s.changesMax
+      })
+    },
+
+    setChangesMax(v) {
+      set((s) => {
+        s.changesMax = v
+      })
     },
 
     toggleTerminal() {
