@@ -27,7 +27,7 @@ pkgbase = hearth-bin
 	options = !debug
 	source = hearth-0.1.0-linux-amd64.deb::https://github.com/zmilojevic/hearth/releases/download/v0.1.0/hearth-0.1.0-linux-amd64.deb
 	source = LICENSE-0.1.0::https://raw.githubusercontent.com/zmilojevic/hearth/v0.1.0/LICENSE
-	sha256sums = 0000000000000000000000000000000000000000000000000000000000000000
-	sha256sums = 0000000000000000000000000000000000000000000000000000000000000000
+	sha256sums = 0087e59ec0ba651018d1d9f05f0271805ec01b81fe5f084c478dca0c1789fdf3
+	sha256sums = cab4070ebe087ed1756818af8752bbafd28cad0f2b8f21b27183f0bbbc811a1e
 
 pkgname = hearth-bin

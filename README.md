@@ -54,7 +54,9 @@ Claude Code binary through the Agent SDK.
 
 Download a build from [Releases](https://github.com/zmilojevic/hearth/releases):
 
-- **Arch / Manjaro / CachyOS**: `yay -S hearth-bin` (or any AUR helper).
+- **Arch / Manjaro / CachyOS**: the `hearth-bin` package is not on the AUR yet (AUR registration is paused);
+  build it from the repo's PKGBUILD meanwhile:
+  `git clone https://github.com/zmilojevic/hearth && cd hearth/packaging/aur/hearth-bin && makepkg -si`
 - **Linux AppImage**: `chmod +x hearth-*.AppImage && ./hearth-*.AppImage`
 - **Debian / Ubuntu**: `sudo apt install ./hearth-*.deb`
 - **macOS (Apple silicon)**: open the dmg and drag the app to Applications. Unsigned builds are blocked by
