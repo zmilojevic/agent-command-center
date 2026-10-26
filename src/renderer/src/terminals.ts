@@ -146,7 +146,7 @@ export function ensureTerminal(id: string, exitedCode?: number): Entry {
     if (ev.ctrlKey && !ev.shiftKey && !ev.altKey && (k === '`' || ev.code === 'Backquote')) return false // app toggle (window listener)
     if ((ev.ctrlKey || ev.metaKey) && ev.shiftKey && !ev.altKey && k.toLowerCase() === 'g') return false // app: changes panel
     if (isMac && ev.metaKey && (k === 'Tab' || k === '`' || ev.code === 'Backquote')) return false // OS-level, let it through
-    if (ev.ctrlKey && k === 'Tab') return false // app: next/previous chat
+    if (ev.ctrlKey && k === 'Tab') return false // app: next/previous chat (plain Tab goes to the shell)
     const macCopy = isMac && ev.metaKey && !ev.ctrlKey && !ev.shiftKey && !ev.altKey && k.toLowerCase() === 'c'
     const macPaste = isMac && ev.metaKey && !ev.ctrlKey && !ev.shiftKey && !ev.altKey && k.toLowerCase() === 'v'
     if (macCopy || (ev.ctrlKey && ev.shiftKey && !ev.altKey && k.toLowerCase() === 'c')) {

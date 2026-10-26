@@ -587,49 +587,59 @@ export default function Sidebar() {
     }
   }, [])
 
-  // Ctrl+Tab / Ctrl+Shift+Tab open the next/previous rendered row immediately on every press. While the modifier
-  // stays held, `lastTarget` is the row opened by the previous press (React may not have re-rendered yet).
+  // Tab / Shift+Tab (bubble phase, so composer pickers that complete with Tab have already called preventDefault) and
+  // Ctrl+Tab / Ctrl+Shift+Tab (capture phase, works everywhere incl. terminal and text fields) open the next/previous
+  // rendered row immediately on every press. `lastTarget` is the row opened by the previous press (React may not
+  // have re-rendered yet); it is only trusted for 1 s.
   const allGroupsRef = useRef(allGroups)
   allGroupsRef.current = allGroups
   const openSessionRef = useRef(openSession)
   openSessionRef.current = openSession
-  const lastTargetRef = useRef<string | null>(null)
+  const lastTargetRef = useRef<{ sid: string; at: number } | null>(null)
   useEffect(() => {
-    const reset = (): void => {
-      lastTargetRef.current = null
-    }
-    const onDown = (e: KeyboardEvent): void => {
+    const step = (e: KeyboardEvent): void => {
       const root = scrollRef.current
-      if (e.key !== 'Tab' || !(e.ctrlKey || (e.metaKey && !isMac)) || e.altKey || !root) return
-      e.preventDefault()
-      e.stopPropagation()
-      if (document.querySelector('.modal-backdrop, .dd-menu, .context-menu')) return
+      if (!root) return
       const rows = Array.from(root.querySelectorAll<HTMLElement>('.row[data-sid]')).filter(notInert)
       if (!rows.length) return
       const st = useStore.getState()
       const active = st.activeChatId ? st.chats[st.activeChatId]?.sessionId : undefined
-      const last = lastTargetRef.current
+      const lt = lastTargetRef.current
+      const last = lt && Date.now() - lt.at < 1000 ? lt.sid : null
       const startSid = last && rows.some((r) => r.dataset.sid === last) ? last : active
       const from = startSid ? rows.findIndex((r) => r.dataset.sid === startSid) : -1
       const n = rows.length
       const next = e.shiftKey ? (from < 0 ? n - 1 : (from - 1 + n) % n) : from < 0 ? 0 : (from + 1) % n
       const sid = rows[next].dataset.sid!
       rows[next].scrollIntoView({ block: 'nearest' })
-      lastTargetRef.current = sid
+      lastTargetRef.current = { sid, at: Date.now() }
       if (sid === active) return
       const sess = allGroupsRef.current.flatMap((x) => x.sessions).find((x) => x.sessionId === sid)
       if (sess) openAndFocus(openSessionRef.current, sess)
     }
-    const onUp = (e: KeyboardEvent): void => {
-      if (e.key === 'Control' || e.key === 'Meta') reset()
+    const overlayOpen = (): boolean => !!document.querySelector('.modal-backdrop, .dd-menu, .context-menu')
+    const onCtrlDown = (e: KeyboardEvent): void => {
+      if (e.key !== 'Tab' || !(e.ctrlKey || (e.metaKey && !isMac)) || e.altKey || !scrollRef.current) return
+      e.preventDefault()
+      e.stopPropagation()
+      if (overlayOpen()) return
+      step(e)
     }
-    window.addEventListener('keydown', onDown, true)
-    window.addEventListener('keyup', onUp)
-    window.addEventListener('blur', reset)
+    const onPlainDown = (e: KeyboardEvent): void => {
+      if (e.key !== 'Tab' || e.ctrlKey || e.altKey || e.metaKey || e.defaultPrevented || !scrollRef.current) return
+      const t = e.target as HTMLElement | null
+      if (t?.closest('.term-panel')) return
+      if (t?.closest('input, select, [contenteditable=""], [contenteditable="true"]')) return
+      if (t?.closest('textarea') && !t.matches('.composer textarea')) return
+      if (overlayOpen()) return
+      e.preventDefault()
+      step(e)
+    }
+    window.addEventListener('keydown', onCtrlDown, true)
+    window.addEventListener('keydown', onPlainDown)
     return () => {
-      window.removeEventListener('keydown', onDown, true)
-      window.removeEventListener('keyup', onUp)
-      window.removeEventListener('blur', reset)
+      window.removeEventListener('keydown', onCtrlDown, true)
+      window.removeEventListener('keydown', onPlainDown)
     }
   }, [])
 

@@ -576,7 +576,7 @@ export default function Composer({ chatId }: { chatId: string }) {
                 }
               }
             }
-            if (e.key === 'Tab' && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey && !pickerOpen && !general) {
+            if (e.code === 'KeyM' && e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && !pickerOpen && !general) {
               e.preventDefault()
               togglePlan()
               return

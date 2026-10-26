@@ -111,7 +111,7 @@ export default function App() {
       const isToggleTerm = e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey && e.code === 'Backquote'
       const isChangesKey = mod && e.shiftKey && e.key.toLowerCase() === 'g'
       // Keys typed into the terminal belong to the shell; only these app hotkeys still work there
-      // (Ctrl+Tab / Ctrl+Shift+Tab are handled by the Sidebar's capture listener).
+      // (Tab / Shift+Tab and Ctrl+Tab / Ctrl+Shift+Tab are handled by the Sidebar's window listeners).
       if (!isToggleTerm && !isChangesKey && (e.target as Element | null)?.closest?.('.term-panel')) return
       if (isToggleTerm) {
         e.preventDefault()

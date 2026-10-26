@@ -30,7 +30,7 @@ that experience on Linux, plus a few things aimed at people who keep many sessio
 - **Chat**: streaming Markdown with highlighted code, thinking summaries, tool cards (Bash output, Edit diffs,
   Write content, todos, web search sources), images by paste or drop, message queue while Claude works, find
   in chat, prompt history.
-- **Control**: permission, question and plan cards (`AskUserQuestion`, plan mode with Shift+Tab), model / effort /
+- **Control**: permission, question and plan cards (`AskUserQuestion`, plan mode with Alt+M), model / effort /
   permission mode per session, `/` command picker, `@` picker for files and subagents, stop, move a running
   command to the background.
 - **Context and usage**: context meter by category with Compact, per-turn token and cache stats, plan rate limits
@@ -114,12 +114,12 @@ On macOS, Ctrl is ⌘.
 | Keys | Action |
 | --- | --- |
 | Ctrl+N | New general chat |
-| Ctrl+Tab / Ctrl+Shift+Tab | Next / previous chat in the sidebar |
+| Tab / Shift+Tab | Next / previous chat in the sidebar (not in the terminal, dialogs or text fields other than the composer; Ctrl+Tab / Ctrl+Shift+Tab work everywhere, including the terminal and text fields) |
 | Up / Down, Left / Right, Enter | Move through the sidebar, collapse / expand projects, open a chat |
 | `/` (outside a text field) | Search sessions |
 | Enter / Shift+Enter | Send (or queue while Claude works) / new line |
 | Esc | Stop the running turn; close dialogs, pickers and the find bar |
-| Shift+Tab | Toggle plan mode |
+| Alt+M | Toggle plan mode |
 | `/`, `@` in the composer | Command picker, file and subagent picker |
 | Ctrl+K, Ctrl+L, Alt+Delete | `/clear` (fresh session in the same row) |
 | Ctrl+W | Delete the active chat's transcript (closes it if it has none) |
