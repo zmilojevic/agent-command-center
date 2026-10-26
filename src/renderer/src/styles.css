@@ -302,6 +302,15 @@ kbd {
 .row:hover + .row::before {
   opacity: 0;
 }
+.row.leaving,
+.group.leaving {
+  overflow: hidden;
+  pointer-events: none;
+}
+.row.leaving::before,
+.group.leaving::before {
+  display: none;
+}
 .group-head {
   display: flex;
   align-items: center;
@@ -313,6 +322,37 @@ kbd {
   font-weight: 600;
   border-radius: 6px;
   text-align: left;
+}
+.group-body {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.18s ease;
+}
+.group-body.open {
+  grid-template-rows: 1fr;
+}
+.group-body-inner {
+  min-height: 0;
+  overflow: clip;
+  opacity: 0;
+  transition: opacity 0.18s ease;
+}
+.group-body.open .group-body-inner {
+  opacity: 1;
+}
+.group-head .chev {
+  transition: transform 0.18s ease;
+  flex-shrink: 0;
+}
+.group-head[aria-expanded='true'] .chev {
+  transform: rotate(90deg);
+}
+@media (prefers-reduced-motion: reduce) {
+  .group-body,
+  .group-body-inner,
+  .group-head .chev {
+    transition: none;
+  }
 }
 .group-head:hover:not(.static) {
   background: var(--surface-2);
@@ -732,6 +772,17 @@ kbd {
   display: flex;
   justify-content: center;
   padding: 4px 16px 8px;
+  animation: group-empty-in 0.18s ease;
+}
+@keyframes group-empty-in {
+  from {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .group-empty {
+    animation: none;
+  }
 }
 .group-empty .btn {
   width: 50%;
@@ -2415,9 +2466,21 @@ pre.diff {
 .cp-del {
   color: color-mix(in srgb, var(--err) 65%, var(--muted));
 }
+.dock-slot {
+  flex-shrink: 0;
+  position: relative;
+  display: flex;
+  min-height: 0;
+}
+/* clip only while sliding or closed: the idle .cp-resize handle hangs 3 px outside the aside */
+.dock-slot.anim,
+.dock-slot:not(.open) {
+  overflow: clip;
+}
+.dock-slot.anim {
+  transition: width 0.18s ease;
+}
 .right-dock {
-  width: min(var(--cp-w, 520px), calc(100% - 344px)); /* chat column keeps 300 px + 44 px tool strip */
-  min-width: min(300px, 50%);
   flex-shrink: 0;
   position: relative;
   display: flex;
@@ -2425,6 +2488,21 @@ pre.diff {
   min-height: 0;
   background: var(--bg-2);
   border-left: 1px solid var(--border);
+  transition: opacity 0.18s ease;
+}
+.dock-slot:not(.open) .right-dock {
+  opacity: 0;
+}
+.dock-pane.anim {
+  overflow: hidden;
+  transition: flex-grow 0.18s ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .dock-slot.anim,
+  .right-dock,
+  .dock-pane.anim {
+    transition: none;
+  }
 }
 .dock-pane {
   flex: 1 1 0;

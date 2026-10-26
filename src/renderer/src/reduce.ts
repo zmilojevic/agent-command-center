@@ -341,6 +341,93 @@ export function applySdkMessage(model: ChatModel, m: any): void {
   }
 }
 
+/** After a reload: bring back what only live events knew (running tools, subagents, task pills). */
+export function restoreLive(model: ChatModel, info: { replay?: unknown[]; inFlight?: { id: string; at: number }[] }): void {
+  const flight = new Map((info.inFlight ?? []).map((x) => [x.id, x.at]))
+  if (flight.size) {
+    for (const msg of model.messages) {
+      for (const b of msg.blocks) {
+        if (b.kind !== 'tool_use' || !flight.has(b.id)) continue
+        b.status = 'running'
+        if (AGENT_TOOLS.has(b.name)) {
+          trackAgentCall(model, b)
+          const a = findSubagent(model, { toolUseId: b.id })
+          if (a) a.startedAt = flight.get(b.id)!
+        }
+      }
+    }
+  }
+  for (const m of info.replay ?? []) applySdkMessage(model, m)
+}
+
+/** Plain text of a user entry's content (string, or text blocks / tool_result text). */
+function entryText(content: unknown): string {
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) return ''
+  return content
+    .map((c: any) => (typeof c?.text === 'string' ? c.text : typeof c?.content === 'string' ? c.content : Array.isArray(c?.content) ? entryText(c.content) : ''))
+    .join('\n')
+}
+
+/**
+ * Renderer-only fallback for restoreLive: a background subagent whose latest launch (or SendMessage resume) has no
+ * task-notification after it is still running. Rebuilt from the parent transcript so a reload against a main process
+ * with no (or a truncated) replay keeps the sidebar rows. Call only when the runner is live.
+ */
+export function restoreBackgroundAgents(model: ChatModel, entries: TranscriptMessage[]): void {
+  const calls = new Map<string, { description: string; type?: string; at?: number }>()
+  /** toolUseId -> agent id and whether it is currently running. */
+  const bg = new Map<string, { taskId: string; running: boolean }>()
+  const ts = (e: any): number | undefined => {
+    const t = typeof e.timestamp === 'string' ? Date.parse(e.timestamp) : typeof e.timestamp === 'number' ? e.timestamp : NaN
+    return Number.isFinite(t) ? t : undefined
+  }
+  for (const e of entries as any[]) {
+    if (e.parent_tool_use_id || e.parent_agent_id) continue
+    const content = e.message?.content
+    if (e.type === 'assistant' && Array.isArray(content)) {
+      for (const c of content) {
+        if (c?.type !== 'tool_use') continue
+        if (AGENT_TOOLS.has(c.name)) {
+          calls.set(c.id, { description: String(c.input?.description ?? ''), type: c.input?.subagent_type ? String(c.input.subagent_type) : undefined, at: ts(e) })
+        } else if (c.name === 'SendMessage' && typeof c.input?.to === 'string') {
+          for (const x of bg.values()) if (x.taskId === c.input.to) x.running = true
+        }
+      }
+    } else if (e.type === 'user') {
+      if (Array.isArray(content)) {
+        for (const c of content) {
+          if (c?.type !== 'tool_result' || !calls.has(c.tool_use_id)) continue
+          const text = entryText(c.content)
+          const id = text.startsWith('Async agent launched') ? /agentId:\s*([A-Za-z0-9_-]+)/.exec(text)?.[1] : undefined
+          if (id) bg.set(c.tool_use_id, { taskId: id, running: true })
+        }
+      }
+      const text = entryText(content)
+      if (!text.includes('<task-notification>')) continue
+      for (const m of text.matchAll(/<task-notification>([\s\S]*?)<\/task-notification>|<task-notification>[\s\S]*$/g)) {
+        const taskId = /<task-id>([^<]+)<\/task-id>/.exec(m[0])?.[1]?.trim()
+        const toolUseId = /<tool-use-id>([^<]+)<\/tool-use-id>/.exec(m[0])?.[1]?.trim()
+        for (const [id, x] of bg) if ((taskId && x.taskId === taskId) || (toolUseId && id === toolUseId)) x.running = false
+      }
+    }
+  }
+  for (const [toolUseId, x] of bg) {
+    if (!x.running) continue
+    const call = calls.get(toolUseId)!
+    let a = findSubagent(model, { toolUseId, taskId: x.taskId })
+    if (!a) {
+      a = { toolUseId, description: call.description, status: 'running', startedAt: call.at ?? Date.now(), toolCalls: 0 }
+      model.subagents.push(a)
+    }
+    if (a.status !== 'running') continue
+    a.taskId = x.taskId
+    a.hidden = false
+    if (!a.description) a.description = call.description
+    if (!a.type && call.type) a.type = call.type
+  }
+}
+
 function applySystem(model: ChatModel, m: any): void {
   switch (m.subtype) {
     case 'init':
@@ -362,7 +449,7 @@ function applySystem(model: ChatModel, m: any): void {
       if (m.task_type && m.task_type !== 'local_agent') {
         let t = model.tasks.find((x) => x.taskId === m.task_id)
         if (!t) {
-          t = { taskId: m.task_id, type: m.task_type, description: '', status: 'running', startedAt: Date.now(), backgrounded: false, ambient: false }
+          t = { taskId: m.task_id, type: m.task_type, description: '', status: 'running', startedAt: m._ccdAt ?? Date.now(), backgrounded: false, ambient: false }
           model.tasks.push(t)
         }
         t.type = m.task_type
@@ -375,7 +462,7 @@ function applySystem(model: ChatModel, m: any): void {
       if (m.skip_transcript || m.ambient) return
       let a = findSubagent(model, { toolUseId: m.tool_use_id, taskId: m.task_id })
       if (!a) {
-        a = { toolUseId: m.tool_use_id ?? m.task_id, description: '', status: 'running', startedAt: Date.now(), toolCalls: 0 }
+        a = { toolUseId: m.tool_use_id ?? m.task_id, description: '', status: 'running', startedAt: m._ccdAt ?? Date.now(), toolCalls: 0 }
         model.subagents.push(a)
       }
       if (a.status !== 'running') {
@@ -456,7 +543,7 @@ function applySystem(model: ChatModel, m: any): void {
       const live = new Map<string, any>((Array.isArray(m.tasks) ? m.tasks : []).map((x: any) => [x.task_id, x]))
       for (const [id, x] of live) {
         if (x.task_type === 'local_agent' || model.tasks.some((t) => t.taskId === id)) continue
-        model.tasks.push({ taskId: id, type: x.task_type, description: x.description ?? '', status: 'running', startedAt: Date.now(), backgrounded: true, ambient: !!x.ambient })
+        model.tasks.push({ taskId: id, type: x.task_type, description: x.description ?? '', status: 'running', startedAt: m._ccdAt ?? Date.now(), backgrounded: true, ambient: !!x.ambient })
       }
       for (const t of model.tasks) {
         if (t.backgrounded && isLive(t) && !live.has(t.taskId)) {

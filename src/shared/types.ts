@@ -254,6 +254,10 @@ export interface LiveChat {
 
 export interface AttachResult extends LiveChat {
   pending: PermissionRequest[]
+  /** Task events of live background tasks/subagents, to rebuild them after a reload. */
+  replay?: unknown[]
+  /** Main-thread tool calls that have not returned yet. */
+  inFlight?: { id: string; at: number }[]
 }
 
 export interface MobileStatus {

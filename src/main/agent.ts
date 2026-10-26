@@ -96,6 +96,9 @@ export class ChatRunner {
   lastActivity = Date.now()
   /** The CLI loop has ended (crash or deliberate close); the runner is dead but may still be in the registry. */
   exited = false
+  private taskLog = new Map<string, any[]>()
+  private lastBgTasks: any = null
+  private inFlight = new Map<string, number>()
   private startTimer: ReturnType<typeof setTimeout> | undefined
   /** Remote-control tap; set by RemoteBridge.enable. */
   remote: RemoteHooks | null = null
@@ -141,7 +144,47 @@ export class ChatRunner {
   }
 
   attachInfo(): AttachResult {
-    return { ...this.summary(), pending: this.pendingRequests() }
+    const replay: unknown[] = []
+    for (const l of this.taskLog.values()) replay.push(...l)
+    if (this.lastBgTasks) replay.push(this.lastBgTasks)
+    const inFlight = [...this.inFlight].map(([id, at]) => ({ id, at }))
+    return { ...this.summary(), pending: this.pendingRequests(), replay, inFlight }
+  }
+
+  /** Keeps what a re-attaching renderer cannot read from the transcript: task events and running tools. */
+  private trackReplay(m: any): void {
+    if (m.type === 'system') {
+      if (m.subtype === 'background_tasks_changed') {
+        this.lastBgTasks = { ...m, _ccdAt: Date.now() }
+        return
+      }
+      if (!['task_started', 'task_updated', 'task_progress', 'task_notification'].includes(m.subtype)) return
+      const id = m.task_id
+      if (typeof id !== 'string') return
+      if (m.subtype === 'task_notification') {
+        this.taskLog.delete(id)
+        return
+      }
+      let l = this.taskLog.get(id)
+      if (!l) {
+        l = []
+        this.taskLog.set(id, l)
+        if (this.taskLog.size > 100) this.taskLog.delete(this.taskLog.keys().next().value as string)
+      }
+      const stamped = { ...m, _ccdAt: Date.now() }
+      if (m.subtype === 'task_progress') {
+        const i = l.findIndex((x) => x.subtype === 'task_progress')
+        if (i >= 0) l.splice(i, 1)
+      }
+      l.push(stamped)
+      if (l.length > 50) l.shift()
+    } else if (m.type === 'assistant' && !m.parent_tool_use_id) {
+      for (const b of m.message?.content ?? []) if (b?.type === 'tool_use' && typeof b.id === 'string' && !this.inFlight.has(b.id)) this.inFlight.set(b.id, Date.now())
+    } else if (m.type === 'user' && !m.parent_tool_use_id) {
+      if (Array.isArray(m.message?.content)) for (const b of m.message.content) if (b?.type === 'tool_result') this.inFlight.delete(b.tool_use_id)
+    } else if (m.type === 'result') {
+      this.inFlight.clear()
+    }
   }
 
   pendingRequests(): PermissionRequest[] {
@@ -236,6 +279,7 @@ export class ChatRunner {
           this.lastModel = m.model
           this.onChange()
         }
+        this.trackReplay(m)
         this.emit('agent:event', { chatId: this.chatId, gen: this.gen, message: m })
         this.remote?.message(m)
         if (m.type === 'result') void this.emitContext()

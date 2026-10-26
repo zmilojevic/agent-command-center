@@ -251,19 +251,31 @@ export default function App() {
               )}
             </ErrorBoundary>
           </div>}
-          {!workflowsRoot && !isPhone && activeChatId && !generalActive && (changesOpen || terminalOpen) && (
-            <RightDock>
-              {changesOpen && (
-                <ErrorBoundary name="Changes" key={`changes-${activeChatId}`}>
-                  <ChangesPanel chatId={activeChatId} />
-                </ErrorBoundary>
-              )}
-              {terminalOpen && (
-                <ErrorBoundary name="Terminal" key={`terminal-${activeChatId}`}>
-                  <TerminalPanel chatId={activeChatId} />
-                </ErrorBoundary>
-              )}
-            </RightDock>
+          {!workflowsRoot && !isPhone && activeChatId && !generalActive && (
+            <RightDock
+              panes={[
+                ...(changesOpen
+                  ? [{
+                      id: 'changes' as const,
+                      node: (
+                        <ErrorBoundary name="Changes" key={`changes-${activeChatId}`}>
+                          <ChangesPanel chatId={activeChatId} />
+                        </ErrorBoundary>
+                      )
+                    }]
+                  : []),
+                ...(terminalOpen
+                  ? [{
+                      id: 'terminal' as const,
+                      node: (
+                        <ErrorBoundary name="Terminal" key={`terminal-${activeChatId}`}>
+                          <TerminalPanel chatId={activeChatId} />
+                        </ErrorBoundary>
+                      )
+                    }]
+                  : [])
+              ]}
+            />
           )}
           {!workflowsRoot && !isPhone && activeChatId && !generalActive && (
             <ErrorBoundary name="ToolStrip" key={`toolstrip-${activeChatId}`}>

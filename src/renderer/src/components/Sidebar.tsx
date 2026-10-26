@@ -1,12 +1,13 @@
 import type React from 'react'
 import { Fragment, useMemo, useRef, useState, useEffect } from 'react'
-import { Plus, Search, Clock, FolderGit2, FolderPlus, ChevronRight, ChevronDown, Pencil, Trash2, GitFork, FolderOpen, Pin, PinOff, MessageSquarePlus, ChevronsDownUp, ChevronsUpDown, XCircle, FolderX, Flame, Snowflake, Check, MessageCircle, GitBranchPlus, Code, SquareTerminal, Smartphone, SlidersHorizontal, Workflow } from 'lucide-react'
+import { Plus, Search, Clock, FolderGit2, FolderPlus, ChevronRight, Pencil, Trash2, GitFork, FolderOpen, Pin, PinOff, MessageSquarePlus, ChevronsDownUp, ChevronsUpDown, XCircle, FolderX, Flame, Snowflake, Check, MessageCircle, GitBranchPlus, Code, SquareTerminal, Smartphone, SlidersHorizontal, Workflow } from 'lucide-react'
 import { openFolderInEditor, openTerminalAt } from '../openIn'
 import { useStore, KEEP_WARM_MAX_IDLE_MS, isGeneral } from '../store'
 import { EFFORT_LEVELS, type SessionSummary, type LiveChat, type ModelChoice } from '@shared/types'
 import { projectName, projectRoot, worktreeOf, relativeTime, shortPath, modelLabel, defaultContextWindow, fmtTokens, fmtElapsed, isMac, isPhone } from '../util'
 import type { Subagent } from '../reduce'
 import { useNow } from '../hooks'
+import { useExitList, animateOut, resetOut } from '../useExitList'
 import { subagentLine } from './ToolCard'
 import type { Chat } from '../store'
 import type { SessionMeta } from '@shared/types'
@@ -15,7 +16,7 @@ import Dropdown from './Dropdown'
 import { useTooltip } from './Tooltip'
 
 // An expanded project with no listed chats collapses itself after this long.
-const EMPTY_COLLAPSE_MS = 30_000
+const EMPTY_COLLAPSE_MS = 5_000
 
 const WINDOWS = [
   { hours: 6, label: 'Last 6 hours' },
@@ -36,12 +37,60 @@ interface Group {
   general?: boolean
 }
 
+const notInert = (x: HTMLElement): boolean => !x.closest('[inert]')
+
+// Animated expand/collapse of a project's body. Children stay mounted while closing; the first render never animates.
+function GroupBody({ open, children }: { open: boolean; children: React.ReactNode }) {
+  const [mounted, setMounted] = useState(open)
+  const [shown, setShown] = useState(open)
+  useEffect(() => {
+    if (open) {
+      setMounted(true)
+      let r2 = 0
+      const r1 = requestAnimationFrame(() => {
+        r2 = requestAnimationFrame(() => setShown(true))
+      })
+      return () => {
+        cancelAnimationFrame(r1)
+        cancelAnimationFrame(r2)
+      }
+    }
+    setShown(false)
+    const t = setTimeout(() => setMounted(false), 200)
+    return () => clearTimeout(t)
+  }, [open])
+  if (!mounted) return null
+  return (
+    <div className={`group-body${shown ? ' open' : ''}`} inert={!open}>
+      <div className="group-body-inner">{children}</div>
+    </div>
+  )
+}
+
 /** Focus the composer textarea once it is mounted (retries a few frames after a chat opens). */
 function focusComposer(tries = 10) {
   if (isPhone) return // would pop the on-screen keyboard over the conversation
   const ta = document.querySelector<HTMLTextAreaElement>('.composer textarea')
   if (ta) ta.focus()
   else if (tries > 0) requestAnimationFrame(() => focusComposer(tries - 1))
+}
+
+/**
+ * Focus the composer as soon as the opened session is the active chat. openSession only resolves
+ * after the runner has started (seconds for a resume), and the Composer's own chatId effect skips
+ * focus while the clicked sidebar row holds it, so waiting for the promise left the prompt unfocused.
+ */
+function focusWhenActive(sessionId: string, tries = 150) {
+  if (isPhone) return
+  const st = useStore.getState()
+  const c = st.activeChatId ? st.chats[st.activeChatId] : undefined
+  if (c?.sessionId === sessionId) focusComposer()
+  else if (tries > 0) setTimeout(() => focusWhenActive(sessionId, tries - 1), 16)
+}
+
+function openAndFocus(open: (s: SessionSummary) => Promise<void>, s: SessionSummary) {
+  focusWhenActive(s.sessionId)
+  void open(s).then(() => requestAnimationFrame(() => focusComposer()))
 }
 
 export default function Sidebar() {
@@ -195,6 +244,23 @@ export default function Sidebar() {
     return q && general.sessions.length === 0 ? projects : [...projects, general]
   }, [sessions, chats, search, recentHours, pinnedProjects, projectOrder, projectNames, hiddenSessions, sessionSortTime, generalDir])
   const groups = useMemo(() => allGroups.filter((g) => !g.general), [allGroups])
+  // Exit transitions: removed rows / projects stay (leaving) until their collapse animation has run.
+  const exitReset = search + '|' + recentHours
+  const shownGroups = useExitList(allGroups, (g) => g.cwd, { resetKey: exitReset })
+  const shownRows = useExitList(
+    allGroups.flatMap((g) => g.sessions.map((s) => ({ cwd: g.cwd, s }))),
+    (x) => x.s.sessionId,
+    { resetKey: exitReset, groupOf: (x) => x.cwd },
+  )
+  const rowsByCwd = useMemo(() => {
+    const m = new Map<string, typeof shownRows>()
+    for (const e of shownRows) {
+      const l = m.get(e.item.cwd)
+      if (l) l.push(e)
+      else m.set(e.item.cwd, [e])
+    }
+    return m
+  }, [shownRows])
 
   // Persist the slot of every project as soon as it shows up so activity never reorders it.
   useEffect(() => {
@@ -240,10 +306,33 @@ export default function Sidebar() {
   }
 
   const isCollapsedGroup = (g: Group): boolean => collapsed[g.cwd] ?? (g.sessions.length > 12 && !search)
+  const prevCounts = useRef<{ key: string; counts: Map<string, number> }>({ key: exitReset, counts: new Map() })
+  const collapseNow = (cwd: string): void =>
+    setCollapsedState((prev) => {
+      const next = { ...prev, [cwd]: true }
+      try {
+        localStorage.setItem('collapsedProjects', JSON.stringify(next))
+      } catch {
+        /* ignore */
+      }
+      return next
+    })
   useEffect(() => {
     const timers = emptyTimers.current
+    const prev = prevCounts.current
+    const sameFilter = prev.key === exitReset
+    const emptied = new Set<string>()
+    if (sameFilter && !search.trim()) {
+      for (const g of allGroups) {
+        if (!g.general && (prev.counts.get(g.cwd) ?? 0) > 0 && g.sessions.length === 0 && !isCollapsedGroup(g)) emptied.add(g.cwd)
+      }
+    }
+    prevCounts.current = { key: exitReset, counts: new Map(allGroups.map((g) => [g.cwd, g.sessions.length])) }
+    for (const cwd of emptied) collapseNow(cwd)
     const eligible = new Set(
-      allGroups.filter((g) => !g.general && !search.trim() && g.sessions.length === 0 && !isCollapsedGroup(g)).map((g) => g.cwd)
+      allGroups
+        .filter((g) => !g.general && !search.trim() && g.sessions.length === 0 && !isCollapsedGroup(g) && !emptied.has(g.cwd))
+        .map((g) => g.cwd)
     )
     for (const [cwd, t] of timers) {
       if (!eligible.has(cwd)) {
@@ -257,19 +346,11 @@ export default function Sidebar() {
         cwd,
         setTimeout(() => {
           timers.delete(cwd)
-          setCollapsedState((prev) => {
-            const next = { ...prev, [cwd]: true }
-            try {
-              localStorage.setItem('collapsedProjects', JSON.stringify(next))
-            } catch {
-              /* ignore */
-            }
-            return next
-          })
+          collapseNow(cwd)
         }, EMPTY_COLLAPSE_MS)
       )
     }
-  }, [allGroups, collapsed, search])
+  }, [allGroups, collapsed, search, recentHours])
   useEffect(() => {
     const timers = emptyTimers.current
     return () => {
@@ -292,10 +373,14 @@ export default function Sidebar() {
       return // re-runs once the rows exist
     }
     revealedFor.current = activeSessionId
-    const raf = requestAnimationFrame(() => {
-      document.querySelector('.sidebar .row.active')?.scrollIntoView({ block: 'nearest' })
-    })
-    return () => cancelAnimationFrame(raf)
+    const reveal = (): void => document.querySelector('.sidebar .row.active')?.scrollIntoView({ block: 'nearest' })
+    const raf = requestAnimationFrame(reveal)
+    // a just-expanded body is still growing from 0fr; scroll again once the transition is done
+    const timer = setTimeout(reveal, 220)
+    return () => {
+      cancelAnimationFrame(raf)
+      clearTimeout(timer)
+    }
   }, [activeSessionId, allGroups, collapsed])
 
   const addProject = async (): Promise<void> => {
@@ -388,7 +473,7 @@ export default function Sidebar() {
   // hands focus to the composer so the key lands there (except "/", which focuses search).
   // Up from the first entry returns to the search field; Delete (without Alt) on a chat row deletes it
   // (or just closes a chat without transcript) and focuses the row now at that position.
-  const focusables = (root: HTMLElement): HTMLElement[] => [...root.querySelectorAll<HTMLElement>('.group-head, .row')]
+  const focusables = (root: HTMLElement): HTMLElement[] => [...root.querySelectorAll<HTMLElement>('.group-head, .row')].filter(notInert)
   const onListKey = (e: React.KeyboardEvent<HTMLDivElement>): void => {
     const el = (e.target as HTMLElement).closest<HTMLElement>('.group-head, .row')
     if (el) navigate(e.currentTarget, el, e)
@@ -446,7 +531,7 @@ export default function Sidebar() {
           if (onDisk.has(sess.sessionId)) await deleteSession(sess)
           else if (openBySession[sess.sessionId]) closeTab(openBySession[sess.sessionId])
           requestAnimationFrame(() => {
-            const rows = root.querySelectorAll<HTMLElement>('.row')
+            const rows = [...root.querySelectorAll<HTMLElement>('.row')].filter(notInert)
             if (rows.length) rows[Math.min(rowIdx, rows.length - 1)].focus()
             else if (head?.isConnected) head.focus()
             else searchRef.current?.focus()
@@ -519,7 +604,7 @@ export default function Sidebar() {
       e.preventDefault()
       e.stopPropagation()
       if (document.querySelector('.modal-backdrop, .dd-menu, .context-menu')) return
-      const rows = Array.from(root.querySelectorAll<HTMLElement>('.row[data-sid]'))
+      const rows = Array.from(root.querySelectorAll<HTMLElement>('.row[data-sid]')).filter(notInert)
       if (!rows.length) return
       const st = useStore.getState()
       const active = st.activeChatId ? st.chats[st.activeChatId]?.sessionId : undefined
@@ -533,7 +618,7 @@ export default function Sidebar() {
       lastTargetRef.current = sid
       if (sid === active) return
       const sess = allGroupsRef.current.flatMap((x) => x.sessions).find((x) => x.sessionId === sid)
-      if (sess) void openSessionRef.current(sess).then(() => requestAnimationFrame(() => focusComposer()))
+      if (sess) openAndFocus(openSessionRef.current, sess)
     }
     const onUp = (e: KeyboardEvent): void => {
       if (e.key === 'Control' || e.key === 'Meta') reset()
@@ -632,10 +717,16 @@ export default function Sidebar() {
           </div>
         )}
 
-        {allGroups.map((g) => {
+        {shownGroups.map(({ item: g, leaving: groupLeaving }) => {
           const isCollapsed = isCollapsedGroup(g)
+          const bucket = groupLeaving ? g.sessions.map((s) => ({ item: { cwd: g.cwd, s }, key: s.sessionId, leaving: false })) : (rowsByCwd.get(g.cwd) ?? [])
           return (
-            <div className="group" key={g.cwd}>
+            <div
+              className={`group${groupLeaving ? ' leaving' : ''}`}
+              key={g.cwd}
+              inert={groupLeaving}
+              ref={(el) => (groupLeaving ? animateOut(el) : resetOut(el))}
+            >
               <div
                 className={`group-head ${dragOver === g.cwd && dragging !== g.cwd ? 'drag-over' : ''} ${dragging === g.cwd ? 'dragging' : ''}`}
                 role="button"
@@ -678,7 +769,7 @@ export default function Sidebar() {
                   setGroupMenu({ x: e.clientX, y: e.clientY, g })
                 }}
               >
-                {isCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+                <ChevronRight size={14} className="chev" />
                 {g.general ? <MessageCircle size={14} /> : g.pinned ? <Pin size={13} className="pin-icon" /> : <FolderGit2 size={14} />}
                 <span className="group-title">
                   <span className="group-name">{g.name}</span>
@@ -697,52 +788,54 @@ export default function Sidebar() {
                   <MessageSquarePlus size={14} />
                 </button>
               </div>
-              {!isCollapsed && g.sessions.length === 0 && (
-                <div className="group-empty">
-                  <button
-                    className="btn"
-                    onClick={() => {
-                      if (g.general) void newGeneralChat()
-                      else quickChat(g.cwd)
-                      requestAnimationFrame(() => focusComposer())
-                    }}
-                  >
-                    <MessageSquarePlus size={15} /> New chat
-                  </button>
-                </div>
-              )}
-              {!isCollapsed &&
-                g.sessions.map((s) => {
-                  const chat = openBySession[s.sessionId] ? chats[openBySession[s.sessionId]] : undefined
-                  const shownAgents = chat ? chat.subagents.filter((a) => !a.hidden || (agentView?.chatId === chat.chatId && agentView.toolUseId === a.toolUseId)) : []
-                  return (
-                    <Fragment key={s.sessionId}>
-                      <SessionRow
-                        s={s}
-                        chat={chat}
-                        liveInfo={liveRunners[s.sessionId]}
-                        active={!!openBySession[s.sessionId] && openBySession[s.sessionId] === activeChatId && agentView?.chatId !== activeChatId}
-                        meta={meta[s.sessionId]}
-                        modelMax={modelMax}
-                        now={now}
-                        compact={g.general}
-                        keepWarm={keepWarm.includes(s.sessionId)}
-                        remote={remoteSessions.includes(s.sessionId) ? (chat ? (remoteStates[chat.chatId]?.state ?? 'connecting') : 'on') : undefined}
-                        warmedAt={warmedAt[s.sessionId]}
-                        onOpen={() => void openSession(s).then(() => requestAnimationFrame(() => focusComposer()))}
-                        onMenu={(e) => {
-                          e.preventDefault()
-                          setMenu({ x: e.clientX, y: e.clientY, s })
-                        }}
-                        onDelete={() => {
-                          if (onDisk.has(s.sessionId)) void deleteSession(s)
-                          else if (openBySession[s.sessionId]) closeTab(openBySession[s.sessionId])
-                        }}
-                      />
-                      {chat && shownAgents.length > 0 && <SubagentList chatId={chat.chatId} agents={shownAgents} />}
-                    </Fragment>
-                  )
-                })}
+              <GroupBody open={!isCollapsed}>
+                {bucket.length === 0 && (
+                  <div className="group-empty">
+                    <button
+                      className="btn"
+                      onClick={() => {
+                        if (g.general) void newGeneralChat()
+                        else quickChat(g.cwd)
+                        requestAnimationFrame(() => focusComposer())
+                      }}
+                    >
+                      <MessageSquarePlus size={15} /> New chat
+                    </button>
+                  </div>
+                )}
+                {bucket.map(({ item: { s }, leaving }) => {
+                    const chat = openBySession[s.sessionId] ? chats[openBySession[s.sessionId]] : undefined
+                    const shownAgents = chat ? chat.subagents.filter((a) => !a.hidden || (agentView?.chatId === chat.chatId && agentView.toolUseId === a.toolUseId)) : []
+                    return (
+                      <Fragment key={s.sessionId}>
+                        <SessionRow
+                          s={s}
+                          leaving={leaving}
+                          chat={chat}
+                          liveInfo={liveRunners[s.sessionId]}
+                          active={!!openBySession[s.sessionId] && openBySession[s.sessionId] === activeChatId && agentView?.chatId !== activeChatId}
+                          meta={meta[s.sessionId]}
+                          modelMax={modelMax}
+                          now={now}
+                          compact={g.general}
+                          keepWarm={keepWarm.includes(s.sessionId)}
+                          remote={remoteSessions.includes(s.sessionId) ? (chat ? (remoteStates[chat.chatId]?.state ?? 'connecting') : 'on') : undefined}
+                          warmedAt={warmedAt[s.sessionId]}
+                          onOpen={() => openAndFocus(openSession, s)}
+                          onMenu={(e) => {
+                            e.preventDefault()
+                            setMenu({ x: e.clientX, y: e.clientY, s })
+                          }}
+                          onDelete={() => {
+                            if (onDisk.has(s.sessionId)) void deleteSession(s)
+                            else if (openBySession[s.sessionId]) closeTab(openBySession[s.sessionId])
+                          }}
+                        />
+                        {!leaving && chat && shownAgents.length > 0 && <SubagentList chatId={chat.chatId} agents={shownAgents} />}
+                      </Fragment>
+                    )
+                  })}
+              </GroupBody>
             </div>
           )
         })}
@@ -750,10 +843,10 @@ export default function Sidebar() {
 
       {menu && (
         <div className="context-menu" style={{ left: Math.min(menu.x, window.innerWidth - 210), top: Math.min(menu.y, window.innerHeight - 260) }} onClick={(e) => e.stopPropagation()}>
-          <button onClick={() => void openSession(menu.s).then(() => {
+          <button onClick={() => {
             setMenu(null)
-            requestAnimationFrame(() => focusComposer())
-          })}>
+            openAndFocus(openSession, menu.s)
+          }}>
             <FolderOpen size={14} /> Open
           </button>
           {openBySession[menu.s.sessionId] && (
@@ -1132,6 +1225,7 @@ function ProjectDefaultsDialog({ cwd, name, onClose }: { cwd: string; name: stri
 
 function SessionRow({
   s,
+  leaving,
   chat,
   liveInfo,
   active,
@@ -1147,6 +1241,8 @@ function SessionRow({
   onDelete,
 }: {
   s: SessionSummary
+  /** Removed from the list; collapsing out, not interactive. */
+  leaving?: boolean
   chat?: Chat
   /** Runner in the main process for a session this client has not opened. */
   liveInfo?: LiveChat
@@ -1203,7 +1299,9 @@ function SessionRow({
   const wt = s.cwd ? worktreeOf(s.cwd) : null
   return (
     <button
-      className={`row ${active ? 'active' : ''}`}
+      className={`row ${active ? 'active' : ''}${leaving ? ' leaving' : ''}`}
+      inert={leaving}
+      ref={(el) => (leaving ? animateOut(el) : resetOut(el))}
       data-sid={s.sessionId}
       onClick={onOpen}
       onContextMenu={onMenu}

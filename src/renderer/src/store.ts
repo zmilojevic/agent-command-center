@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { immer } from 'zustand/middleware/immer'
 import type { RemoteStateEvent, SessionSummary, LiveChat, PermissionRequest, PermissionMode, ModelChoice, EffortLevel, StartChatOptions, SessionMeta, ChatContext, SlashCommandInfo, AgentChoice, ContentBlock, UserContent, Theme, GitChanges } from '@shared/types'
-import { applySdkMessage, applyTranscript, emptyModel, findTool, type ChatModel, type Block } from './reduce'
+import { applySdkMessage, applyTranscript, emptyModel, restoreLive, restoreBackgroundAgents, findTool, type ChatModel, type Block } from './reduce'
 import type { WfGraph, WorkflowFile, WorkflowReadResult, WorkflowScope } from '../../shared/workflow'
 import type { ImageAttachment } from './images'
 import { basename, projectRoot, isPhone } from './util'
@@ -1342,6 +1342,8 @@ async function attachLive(chatId: string, o: { background: boolean; title?: stri
     const c = s.chats[chatId]
     if (!c) return
     mergeTranscript(c, entries)
+    restoreBackgroundAgents(c, entries)
+    restoreLive(c, res)
     c.transcriptLoaded = true
     if (c.title === 'New chat' && c.sessionId) {
       const x = s.sessions.find((y) => y.sessionId === c.sessionId)
@@ -1403,8 +1405,12 @@ async function reattachAll(): Promise<void> {
       c.permissionMode = res!.permissionMode
       if (sessionId) c.sessionId = sessionId
       if (entries) {
+        c.subagents = []
+        c.tasks = []
         c.messages = []
         applyTranscript(c, entries)
+        restoreBackgroundAgents(c, entries)
+        restoreLive(c, res!)
         c.transcriptLoaded = true
       }
     })
@@ -1556,6 +1562,12 @@ function permissionText(req: PermissionRequest): string {
   return clip120(`Claude wants to use ${req.toolName}${typeof target === 'string' ? ` on ${target}` : ''}`)
 }
 
+/** Background work (tasks, workflows, subagents) that will start another turn when it ends. */
+function stillWorking(c: Chat): boolean {
+  const live = (st: string): boolean => st === 'pending' || st === 'running' || st === 'paused'
+  return c.tasks.some((t) => !t.ambient && live(t.status)) || c.subagents.some((a) => a.status === 'running')
+}
+
 /** Notify only when the user can't see that chat right now. */
 function maybeNotify(chatId: string, body: string, kind: 'done' | 'attention'): void {
   const s = useStore.getState()
@@ -1681,6 +1693,8 @@ export function wireEvents(): void {
     const before = useStore.getState().chats[chatId]
     if (!before) return autoAttach(chatId)
     if (stale(before, gen)) return
+    // The reducer clears this flag on the result, so read it first: a turn the user stopped needs no notification.
+    const interrupted = message.type === 'result' && !!before.interrupted
     useStore.setState((s) => {
       const c = s.chats[chatId]
       if (!c) return
@@ -1701,6 +1715,9 @@ export function wireEvents(): void {
       void useStore.getState().sendMessage(chatId, next.text, next.images)
       return
     }
+    // Only notify when the whole task is over: background shells, workflows and subagents still running
+    // wake Claude up for another turn when they finish, so this result is just a pause.
+    if (interrupted || stillWorking(c)) return
     maybeNotify(chatId, clip120(lastAssistantText(c)), 'done')
   })
   window.desktop.onPermissionRequest((req) => {

@@ -8,6 +8,7 @@ export default function TerminalPanel({ chatId }: { chatId: string }) {
   const cwd = useStore((s) => s.chats[chatId]?.cwd ?? '')
   const folder = useStore((s) => s.terminals[cwd])
   const loaded = useStore((s) => s.terminalsLoaded)
+  const termOpen = useStore((s) => s.terminalOpen)
   const newTerminal = useStore((s) => s.newTerminal)
   const killTerminal = useStore((s) => s.killTerminal)
   const setActive = useStore((s) => s.setActiveTerminal)
@@ -18,8 +19,8 @@ export default function TerminalPanel({ chatId }: { chatId: string }) {
 
   // Opening the panel for a folder without shells starts one.
   useEffect(() => {
-    if (loaded && cwd && empty) void newTerminal(cwd)
-  }, [loaded, cwd, empty, newTerminal])
+    if (loaded && termOpen && cwd && empty) void newTerminal(cwd)
+  }, [loaded, termOpen, cwd, empty, newTerminal])
 
   useEffect(() => {
     const el = host.current
