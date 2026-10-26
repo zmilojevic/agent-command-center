@@ -97,6 +97,8 @@ interface State {
   activeChatId: string | null
   /** Project root whose workflow designer replaces the chat pane (not persisted). */
   workflowsRoot: string | null
+  /** Read-only view of a subagent's transcript replacing the chat pane of `chatId` (not persisted). */
+  agentView: { chatId: string; toolUseId: string } | null
   /** Unsaved workflow designer drafts per project root (not persisted). */
   workflowDrafts: Record<string, WorkflowDraft>
   showNewDialog: boolean
@@ -164,6 +166,8 @@ interface State {
   /** A general chat (no project folder) with the last-used model, effort and mode. */
   newGeneralChat(): Promise<void>
   activate(chatId: string | null): void
+  openAgentView(chatId: string, toolUseId: string): void
+  closeAgentView(): void
   openWorkflows(root: string): void
   closeWorkflows(): void
   setWorkflowDraft(root: string, draft: WorkflowDraft | null): void
@@ -338,6 +342,7 @@ export const useStore = create<State>()(
     recent: [],
     activeChatId: null,
     workflowsRoot: null,
+    agentView: null,
     workflowDrafts: {},
     showNewDialog: false,
     newDialogCwd: null,
@@ -593,6 +598,7 @@ export const useStore = create<State>()(
     activate(chatId) {
       set((s) => {
         s.activeChatId = chatId
+        s.agentView = null
         if (chatId) s.workflowsRoot = null
         if (chatId && s.chats[chatId]) {
           s.chats[chatId].unread = false
@@ -601,9 +607,24 @@ export const useStore = create<State>()(
       })
     },
 
+    openAgentView(chatId, toolUseId) {
+      if (!get().chats[chatId]) return
+      get().activate(chatId)
+      set((s) => {
+        s.agentView = { chatId, toolUseId }
+      })
+    },
+
+    closeAgentView() {
+      set((s) => {
+        s.agentView = null
+      })
+    },
+
     openWorkflows(root) {
       set((s) => {
         s.workflowsRoot = root
+        s.agentView = null
       })
     },
 
@@ -625,6 +646,7 @@ export const useStore = create<State>()(
       void window.desktop.closeChat(chatId)
       set((s) => {
         delete s.chats[chatId]
+        if (s.agentView?.chatId === chatId) s.agentView = null
         s.tabs = s.tabs.filter((t) => t !== chatId)
         s.recent = s.recent.filter((t) => t !== chatId && s.tabs.includes(t))
         // Fall back to the chat used most recently before this one, else an empty pane.

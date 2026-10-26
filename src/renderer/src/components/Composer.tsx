@@ -5,7 +5,7 @@ import ImageThumb from './ImageThumb'
 import TasksStrip from './TasksStrip'
 import { useStore, isGeneral } from '../store'
 import { EFFORT_LEVELS, PERMISSION_MODES, type PermissionMode, type SlashCommandInfo, type AgentChoice } from '@shared/types'
-import { modelLabel, fmtTokens, modLabel, isPhone } from '../util'
+import { modelLabel, fmtTokens, modLabel, isPhone, defaultContextWindow } from '../util'
 import { dataUrl, readImages } from '../images'
 
 const FALLBACK_MODELS: { value: string; displayName: string; description?: string }[] = [
@@ -160,6 +160,9 @@ export default function Composer({ chatId }: { chatId: string }) {
   }, [coldAt, cacheBusy])
   const cold = !!coldAt && !cacheBusy && Date.now() >= coldAt
   const metaTokens = useStore((s) => (sid ? s.meta[sid]?.contextTokens : undefined))
+  const ctxTokens = chat.context?.totalTokens ?? metaTokens
+  const ctxMax = Math.max(chat.context?.maxTokens || defaultContextWindow(chat.model), ctxTokens ?? 0)
+  const smallContext = ctxTokens != null && ctxTokens < ctxMax * 0.05
   const [coldConfirm, setColdConfirm] = useState(false)
   useEffect(() => setColdConfirm(false), [chatId])
   const general = useStore((s) => isGeneral(s.chats[chatId]?.cwd))
@@ -318,8 +321,8 @@ export default function Composer({ chatId }: { chatId: string }) {
       void clearChat(chatId)
       return
     }
-    // Sending on a cold cache re-sends the whole conversation uncached: confirm first (slash commands exempt).
-    if (!busy && !text.startsWith('/') && !!coldAt && Date.now() >= coldAt) {
+    // Sending on a cold cache re-sends the whole conversation uncached: confirm first (slash commands and context < 5% exempt).
+    if (!busy && !text.startsWith('/') && !!coldAt && Date.now() >= coldAt && !smallContext) {
       setColdConfirm(true)
       return
     }
@@ -722,7 +725,7 @@ export default function Composer({ chatId }: { chatId: string }) {
       {coldConfirm && (
         <ColdCacheConfirm
           coldFor={Date.now() - coldAt}
-          tokens={chat.context?.totalTokens ?? metaTokens}
+          tokens={ctxTokens}
           onCancel={() => {
             setColdConfirm(false)
             ta.current?.focus()

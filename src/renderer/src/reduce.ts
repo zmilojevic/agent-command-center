@@ -573,7 +573,7 @@ function streamTarget(model: ChatModel, m: any, create: boolean): ChatMessage | 
 
 // ---- stored transcript ----------------------------------------------------
 
-export function applyTranscript(model: ChatModel, entries: TranscriptMessage[]): void {
+export function applyTranscript(model: ChatModel, entries: TranscriptMessage[], opts?: { live?: boolean }): void {
   for (const e of entries) {
     if (e.parent_tool_use_id || e.parent_agent_id) continue
     const msg: any = e.message
@@ -601,6 +601,7 @@ export function applyTranscript(model: ChatModel, entries: TranscriptMessage[]):
       target.finalized = target.blocks.length
     }
   }
+  if (opts?.live) return
   for (const msg of model.messages) for (const b of msg.blocks) if (b.kind === 'tool_use' && b.status === 'running') b.status = 'done'
 }
 

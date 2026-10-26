@@ -7,6 +7,7 @@
 export const INVOKES = {
   listSessions: 'sessions:list',
   getMessages: 'sessions:messages',
+  subagentTranscript: 'subagent:transcript',
   getSessionMeta: 'sessions:meta',
   renameSession: 'sessions:rename',
   deleteSession: 'sessions:delete',

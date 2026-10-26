@@ -56,6 +56,7 @@ export default function Sidebar() {
   const setRecentHours = useStore((s) => s.setRecentHours)
   const chats = useStore((s) => s.chats)
   const activeChatId = useStore((s) => s.activeChatId)
+  const agentView = useStore((s) => s.agentView)
   const openSession = useStore((s) => s.openSession)
   const closeTab = useStore((s) => s.closeTab)
   const setShowNewDialog = useStore((s) => s.setShowNewDialog)
@@ -713,14 +714,14 @@ export default function Sidebar() {
               {!isCollapsed &&
                 g.sessions.map((s) => {
                   const chat = openBySession[s.sessionId] ? chats[openBySession[s.sessionId]] : undefined
-                  const shownAgents = chat ? chat.subagents.filter((a) => !a.hidden) : []
+                  const shownAgents = chat ? chat.subagents.filter((a) => !a.hidden || (agentView?.chatId === chat.chatId && agentView.toolUseId === a.toolUseId)) : []
                   return (
                     <Fragment key={s.sessionId}>
                       <SessionRow
                         s={s}
                         chat={chat}
                         liveInfo={liveRunners[s.sessionId]}
-                        active={!!openBySession[s.sessionId] && openBySession[s.sessionId] === activeChatId}
+                        active={!!openBySession[s.sessionId] && openBySession[s.sessionId] === activeChatId && agentView?.chatId !== activeChatId}
                         meta={meta[s.sessionId]}
                         modelMax={modelMax}
                         now={now}
@@ -738,7 +739,7 @@ export default function Sidebar() {
                           else if (openBySession[s.sessionId]) closeTab(openBySession[s.sessionId])
                         }}
                       />
-                      {shownAgents.length > 0 && <SubagentList agents={shownAgents} />}
+                      {chat && shownAgents.length > 0 && <SubagentList chatId={chat.chatId} agents={shownAgents} />}
                     </Fragment>
                   )
                 })}
@@ -1266,12 +1267,19 @@ function fmtTokensShort(n: number): string {
 }
 
 /** Subagents of an open chat, nested under its row; finished ones stay dimmed until the main turn ends. */
-function SubagentList({ agents }: { agents: Subagent[] }) {
+function SubagentList({ chatId, agents }: { chatId: string; agents: Subagent[] }) {
   const now = useNow(agents.some((a) => a.status === 'running'))
+  const viewing = useStore((s) => (s.agentView?.chatId === chatId ? s.agentView.toolUseId : null))
+  const openAgentView = useStore((s) => s.openAgentView)
   return (
     <div className="subagents">
       {agents.map((a) => (
-        <div key={a.toolUseId} className={`subagent ${a.status}`} title={`${a.type ? a.type + ' · ' : ''}${subagentLine(a, now)}`}>
+        <div
+          key={a.toolUseId}
+          role="button"
+          className={`subagent ${a.status}${viewing === a.toolUseId ? ' active' : ''}`}
+          onClick={() => openAgentView(chatId, a.toolUseId)}
+          title={`${a.type ? a.type + ' · ' : ''}${subagentLine(a, now)}`}>
           <span className={`dot ${a.status === 'running' ? 'busy' : a.status === 'failed' ? 'failed' : 'done'}`} />
           <span className="subagent-desc">{a.description || a.type || 'Subagent'}</span>
           {a.status === 'running' && a.lastTool && <span className="subagent-tool">{a.lastTool}</span>}

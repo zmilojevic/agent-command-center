@@ -102,6 +102,17 @@ export interface TranscriptMessage {
   parent_agent_id: string | null
 }
 
+export interface SubagentTranscript {
+  found: boolean
+  /** Same mtime as the caller's `sinceMtime`: nothing to re-read. */
+  unchanged?: boolean
+  mtimeMs?: number
+  messages?: TranscriptMessage[]
+  agentType?: string
+  description?: string
+  model?: string
+}
+
 export interface StartChatOptions {
   chatId: string
   cwd: string
@@ -267,6 +278,7 @@ export interface DesktopApi {
   client: 'desktop' | 'mobile'
   listSessions(): Promise<SessionSummary[]>
   getMessages(sessionId: string, cwd?: string): Promise<TranscriptMessage[]>
+  subagentTranscript(cwd: string, sessionId: string, toolUseId: string, sinceMtime?: number): Promise<SubagentTranscript>
   getSessionMeta(items: { sessionId: string; cwd: string }[]): Promise<SessionMeta[]>
   renameSession(sessionId: string, title: string, cwd?: string): Promise<void>
   deleteSession(sessionId: string, cwd?: string): Promise<void>

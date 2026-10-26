@@ -12,11 +12,14 @@ export default function MessageItem({
   message,
   pendingByTool,
   continuation,
+  readOnly,
 }: {
   chatId: string
   message: ChatMessage
   pendingByTool: Map<string, PermissionRequest>
   continuation?: boolean
+  /** Subagent transcript view: no controls that act on the parent chat. */
+  readOnly?: boolean
 }) {
   if (message.role === 'divider') {
     return <div className="divider">{message.label}</div>
@@ -62,7 +65,7 @@ export default function MessageItem({
         {message.blocks.map((b, i) => {
           if (b.kind === 'text') return b.text ? <Markdown key={i} text={b.text} streaming={message.streaming} /> : null
           if (b.kind === 'thinking') return b.text ? <Thinking key={i} text={b.text} /> : null
-          if (b.kind === 'tool_use') return <ToolCard key={b.id} chatId={chatId} block={b} pending={pendingByTool.get(b.id)} />
+          if (b.kind === 'tool_use') return <ToolCard key={b.id} chatId={chatId} block={b} pending={pendingByTool.get(b.id)} readOnly={readOnly} />
           return null
         })}
       </div>

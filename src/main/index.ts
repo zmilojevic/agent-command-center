@@ -8,6 +8,7 @@ import { listSessions, getSessionMessages, renameSession, deleteSession } from '
 import { RunnerRegistry, listAllModels } from './agent'
 import { handle, on } from './ipc'
 import { registerSharedPrefs } from './sharedPrefs'
+import { readSubagentTranscript } from './subagents'
 import { readSessionMeta } from './sessionMeta'
 import { UsageService } from './usage'
 import { gitChanges, createWorktree, removeWorktree, gitSetStaged, gitDiscardFile, gitDiscardHunk } from './git'
@@ -108,6 +109,10 @@ handle('sessions:list', async () => {
 
 handle('sessions:messages', async (_ctx, sessionId: string, cwd?: string) => {
   return getSessionMessages(sessionId, { dir: cwd })
+})
+
+handle('subagent:transcript', async (_ctx, cwd: string, sessionId: string, toolUseId: string, sinceMtime?: number) => {
+  return readSubagentTranscript(cwd, sessionId, toolUseId, sinceMtime)
 })
 
 handle('sessions:meta', async (_ctx, items: { sessionId: string; cwd: string }[]) => {

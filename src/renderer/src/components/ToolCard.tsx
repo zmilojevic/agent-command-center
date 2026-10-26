@@ -149,7 +149,7 @@ function AgentBody({ block, agent }: { block: ToolBlock; agent?: Subagent }) {
   )
 }
 
-export default function ToolCard({ chatId, block, pending }: { chatId: string; block: ToolBlock; pending?: PermissionRequest }) {
+export default function ToolCard({ chatId, block, pending, readOnly }: { chatId: string; block: ToolBlock; pending?: PermissionRequest; readOnly?: boolean }) {
   const [open, setOpen] = useState(false)
   const isAgent = block.name === 'Agent' || block.name === 'Task'
   const agent = useStore((s) => (isAgent ? s.chats[chatId]?.subagents.find((a) => a.toolUseId === block.id) : undefined))
@@ -268,7 +268,7 @@ export default function ToolCard({ chatId, block, pending }: { chatId: string; b
         >
           {summary}
         </span>
-        {block.name === 'Bash' && block.status === 'running' && !pending && !i.run_in_background && chatBusy && (
+        {block.name === 'Bash' && block.status === 'running' && !pending && !i.run_in_background && chatBusy && !readOnly && (
           <span
             className="bg-btn"
             role="button"

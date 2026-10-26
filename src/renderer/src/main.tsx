@@ -15,6 +15,7 @@ import './styles/platform.css'
 import './styles/mobile-pair.css'
 import './styles/phone.css'
 import './styles/workflows.css'
+import './styles/agent-view.css'
 
 document.documentElement.dataset.platform = window.desktop.platform
 document.documentElement.dataset.client = window.desktop.client

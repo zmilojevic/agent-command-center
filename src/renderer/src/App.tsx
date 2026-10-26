@@ -5,6 +5,7 @@ import Sidebar from './components/Sidebar'
 import TopBar from './components/TopBar'
 import ChatView from './components/ChatView'
 import Composer from './components/Composer'
+import AgentView, { ReadOnlyComposer } from './components/AgentView'
 import NewSessionDialog from './components/NewSessionDialog'
 import ErrorBoundary from './components/ErrorBoundary'
 import FindBar from './components/FindBar'
@@ -62,6 +63,8 @@ export default function App() {
   const toggleChanges = useStore((s) => s.toggleChanges)
   const terminalOpen = useStore((s) => s.terminalOpen)
   const workflowsRoot = useStore((s) => s.workflowsRoot)
+  const agentView = useStore((s) => s.agentView)
+  const [agentModel, setAgentModel] = useState<string | undefined>()
 
   useEffect(() => {
     wireEvents()
@@ -96,7 +99,7 @@ export default function App() {
     const chatHotkeyTarget = (e: KeyboardEvent) => {
       const st = useStore.getState()
       const chat = st.activeChatId ? st.chats[st.activeChatId] : undefined
-      if (!chat || st.workflowsRoot) return undefined
+      if (!chat || st.workflowsRoot || st.agentView) return undefined
       if (document.querySelector('.modal-backdrop, .dd-menu, .context-menu')) return undefined
       const t = e.target instanceof HTMLElement ? e.target : null
       const inText = !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)
@@ -142,7 +145,7 @@ export default function App() {
         window.desktop.window('reload')
       } else if (mod && !e.shiftKey && e.key.toLowerCase() === 'f') {
         e.preventDefault()
-        if (!useStore.getState().activeChatId || useStore.getState().workflowsRoot) return
+        if (!useStore.getState().activeChatId || useStore.getState().workflowsRoot || useStore.getState().agentView) return
         if (useStore.getState().findOpen) window.dispatchEvent(new Event('ccd-find-focus'))
         else setFindOpen(true)
       } else if (!e.shiftKey && e.code === 'KeyW' && (mod ? !e.altKey : e.altKey) && !e.defaultPrevented) {
@@ -168,6 +171,16 @@ export default function App() {
         requestAnimationFrame(() => {
           if (useStore.getState().activeChatId) focusComposer()
         })
+      } else if (
+        e.key === 'Escape' &&
+        useStore.getState().agentView &&
+        !useStore.getState().showNewDialog &&
+        !mod && !e.shiftKey && !e.altKey &&
+        !e.defaultPrevented &&
+        !document.querySelector('.modal-backdrop, .dd-menu, .context-menu')
+      ) {
+        useStore.getState().closeAgentView()
+        focusComposer()
       } else if (e.key === 'Escape' && useStore.getState().showNewDialog) {
         setShowNewDialog(false)
       } else if (e.key === 'Escape' && useStore.getState().findOpen) {
@@ -218,8 +231,16 @@ export default function App() {
             </ErrorBoundary>
           )}
           {!workflowsRoot && <div className={`chat-pane ${freshGeneral ? 'fresh' : ''}`}>
-            <ErrorBoundary name="Chat" key={activeChatId ?? 'none'}>
-              {activeChatId && (
+            <ErrorBoundary name="Chat" key={`${activeChatId ?? 'none'}${agentView && agentView.chatId === activeChatId ? `:${agentView.toolUseId}` : ''}`}>
+              {activeChatId && agentView && agentView.chatId === activeChatId && (
+                <>
+                  <div className="chat-area">
+                    <AgentView chatId={activeChatId} toolUseId={agentView.toolUseId} onModel={setAgentModel} />
+                  </div>
+                  <ReadOnlyComposer model={agentModel} />
+                </>
+              )}
+              {activeChatId && !(agentView && agentView.chatId === activeChatId) && (
                 <>
                   <div className="chat-area">
                     {findOpen && <FindBar chatId={activeChatId} />}
