@@ -26,6 +26,8 @@ export default function AgentView({ chatId, toolUseId, onModel }: { chatId: stri
   const lastMtime = useRef<number | undefined>(undefined)
   const seq = useRef(0)
   const foundRef = useRef(false)
+  const hasAgent = useRef(!!agent)
+  hasAgent.current = !!agent
   const scroller = useRef<HTMLDivElement>(null)
   const stick = useRef(true)
 
@@ -46,6 +48,11 @@ export default function AgentView({ chatId, toolUseId, onModel }: { chatId: stri
       setAnswered(true)
       setFound(res.found)
       foundRef.current = res.found
+      if (!res.found && !hasAgent.current) {
+        stopped = true
+        clearInterval(timer)
+        return
+      }
       if (!res.found || res.unchanged) return
       lastMtime.current = res.mtimeMs
       onModel?.(res.model)
@@ -55,16 +62,16 @@ export default function AgentView({ chatId, toolUseId, onModel }: { chatId: stri
     // The final fetch after the run ends must re-render with non-live tool states even if the file did not change.
     void fetchOnce(!!running, !running)
     const graceEnd = Date.now() + 10_000
-    const t = setInterval(() => {
+    const timer = setInterval(() => {
       if (!running && foundRef.current && Date.now() > graceEnd) {
-        clearInterval(t)
+        clearInterval(timer)
         return
       }
       void fetchOnce(!!running, false)
     }, 1500)
     return () => {
       stopped = true
-      clearInterval(t)
+      clearInterval(timer)
     }
   }, [cwd, sessionId, toolUseId, running, onModel])
 
@@ -109,7 +116,7 @@ export default function AgentView({ chatId, toolUseId, onModel }: { chatId: stri
       <div className="chat-scroll" ref={scroller}>
         <div className="chat-col">
           {!answered && <div className="muted center">Loading subagent transcript…</div>}
-          {answered && !found && <div className="muted center">Waiting for the subagent's transcript…</div>}
+          {answered && !found && <div className="muted center">{agent ? "Waiting for the subagent's transcript…" : 'No transcript was saved for this subagent.'}</div>}
           {model.messages.map((m, idx) => (
             <MessageItem
               key={m.id}

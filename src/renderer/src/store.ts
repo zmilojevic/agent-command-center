@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { immer } from 'zustand/middleware/immer'
-import type { RemoteStateEvent, SessionSummary, LiveChat, PermissionRequest, PermissionMode, ModelChoice, EffortLevel, StartChatOptions, SessionMeta, ChatContext, SlashCommandInfo, AgentChoice, ContentBlock, UserContent, Theme, GitChanges } from '@shared/types'
-import { applySdkMessage, applyTranscript, emptyModel, restoreLive, restoreBackgroundAgents, findTool, type ChatModel, type Block } from './reduce'
+import type { RemoteStateEvent, SessionSummary, LiveChat, PermissionRequest, PermissionMode, ModelChoice, EffortLevel, StartChatOptions, SessionMeta, ChatContext, SlashCommandInfo, AgentChoice, ContentBlock, UserContent, Theme, GitChanges, UpdateInfo } from '@shared/types'
+import { applySdkMessage, applyTranscript, emptyModel, restoreLive, restoreBackgroundAgents, restoreFinishedAgents, findTool, type ChatModel, type Block } from './reduce'
 import type { WfGraph, WorkflowFile, WorkflowReadResult, WorkflowScope } from '../../shared/workflow'
 import type { ImageAttachment } from './images'
 import { basename, projectRoot, isPhone } from './util'
@@ -136,6 +136,13 @@ interface State {
   lastCwd: string
   notifications: boolean
   notifySound: boolean
+  /** Desktop only: look for a newer Hearth release (never installs). */
+  updateCheck: boolean
+  dismissedUpdate: string
+  update: UpdateInfo | null
+  /** Claude Code login state from `claude auth status`; 'unknown' never blocks anything. */
+  auth: 'unknown' | 'in' | 'out'
+  loginOpen: boolean
   theme: Theme
   diffTint: DiffTint
   /** Preferred editor / terminal ids ('' = first detected; editor 'system' = OS handler). */
@@ -176,6 +183,12 @@ interface State {
   closeTab(chatId: string): void
   toggleTerminal(): void
   restoreTerminals(): Promise<void>
+  setUpdateCheck(v: boolean): void
+  dismissUpdate(): void
+  checkUpdate(): Promise<void>
+  checkAuth(): Promise<void>
+  openLogin(): void
+  closeLogin(): void
   newTerminal(cwd: string): Promise<void>
   runInTerminal(cwd: string, text: string, run: boolean): Promise<void>
   killTerminal(id: string): void
@@ -381,6 +394,11 @@ export const useStore = create<State>()(
     lastCwd: prefs.get('lastCwd', ''),
     notifications: prefs.get('notifications', true),
     notifySound: prefs.get('notifySound', true),
+    updateCheck: prefs.get('updateCheck', true),
+    dismissedUpdate: prefs.get('dismissedUpdate', ''),
+    update: null,
+    auth: 'unknown',
+    loginOpen: false,
     theme: prefs.get<Theme>('theme', 'system'),
     diffTint: prefs.get<DiffTint>('diffTint', 'row'),
     editor: prefs.get('editor', ''),
@@ -514,6 +532,7 @@ export const useStore = create<State>()(
         const c = s.chats[chatId]
         if (!c) return
         applyTranscript(c, entries)
+        restoreFinishedAgents(c, entries)
         c.transcriptLoaded = true
       })
       const opts: StartChatOptions = { chatId, cwd, permissionMode: mode, resume: sess.sessionId, fork }
@@ -871,6 +890,44 @@ export const useStore = create<State>()(
       set((s) => {
         s.notifySound = v
       })
+    },
+
+    setUpdateCheck(v) {
+      prefs.set('updateCheck', v)
+      set((s) => {
+        s.updateCheck = v
+      })
+      if (v) void get().checkUpdate()
+    },
+
+    dismissUpdate() {
+      const latest = get().update?.latest
+      if (!latest) return
+      prefs.set('dismissedUpdate', latest)
+      set((s) => {
+        s.dismissedUpdate = latest
+      })
+    },
+
+    async checkUpdate() {
+      if (isPhone) return
+      const info = await window.desktop.checkUpdate().catch(() => null)
+      if (info) set((s) => void (s.update = info))
+    },
+
+    async checkAuth() {
+      if (isPhone) return
+      const st = await window.desktop.authStatus().catch(() => null)
+      if (st) set((s) => void (s.auth = st.state))
+    },
+
+    openLogin() {
+      if (isPhone) return
+      set((s) => void (s.loginOpen = true))
+    },
+
+    closeLogin() {
+      set((s) => void (s.loginOpen = false))
     },
 
     setTheme(theme) {
@@ -1342,6 +1399,7 @@ async function attachLive(chatId: string, o: { background: boolean; title?: stri
     const c = s.chats[chatId]
     if (!c) return
     mergeTranscript(c, entries)
+    restoreFinishedAgents(c, entries)
     restoreBackgroundAgents(c, entries)
     restoreLive(c, res)
     c.transcriptLoaded = true
@@ -1409,6 +1467,7 @@ async function reattachAll(): Promise<void> {
         c.tasks = []
         c.messages = []
         applyTranscript(c, entries)
+        restoreFinishedAgents(c, entries)
         restoreBackgroundAgents(c, entries)
         restoreLive(c, res!)
         c.transcriptLoaded = true
@@ -1699,6 +1758,7 @@ export function wireEvents(): void {
       const c = s.chats[chatId]
       if (!c) return
       applySdkMessage(c, message)
+      if (c.error === 'authentication_failed' && !isPhone) s.auth = 'out'
       if (message.type === 'result' && (s.activeChatId !== chatId || !document.hasFocus())) c.unread = true
       if (message.type === 'system' && message.subtype === 'commands_changed' && Array.isArray(message.commands)) {
         c.commands = message.commands.map((x: SlashCommandInfo) => ({ name: x.name, description: x.description, argumentHint: x.argumentHint, aliases: x.aliases }))

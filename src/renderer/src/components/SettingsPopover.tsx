@@ -100,6 +100,9 @@ export default function SettingsPopover() {
   const setNotifications = useStore((s) => s.setNotifications)
   const notifySound = useStore((s) => s.notifySound)
   const setNotifySound = useStore((s) => s.setNotifySound)
+  const updateCheck = useStore((s) => s.updateCheck)
+  const setUpdateCheck = useStore((s) => s.setUpdateCheck)
+  const update = useStore((s) => s.update)
   const theme = useStore((s) => s.theme)
   const setTheme = useStore((s) => s.setTheme)
   const editor = useStore((s) => s.editor)
@@ -217,6 +220,29 @@ export default function SettingsPopover() {
               </button>
             </label>
           )}
+          <label className="toggle-row">
+            <span className="toggle-text">
+              <span>Check for updates</span>
+              {update && <span className="muted small version-line">
+                Hearth {update.current}
+                {update.newer && update.latest && (
+                  <>
+                    {' · '}
+                    <a onClick={() => update.url && window.open(update.url)}>{update.latest} available</a>
+                  </>
+                )}
+              </span>}
+            </span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={updateCheck}
+              className={`switch ${updateCheck ? 'on' : ''}`}
+              onClick={() => setUpdateCheck(!updateCheck)}
+            >
+              <span className="knob" />
+            </button>
+          </label>
           <label className="toggle-row">
             <span className="toggle-text">
               <span>Phone access</span>

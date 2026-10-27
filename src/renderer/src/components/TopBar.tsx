@@ -1,4 +1,4 @@
-import { ChevronLeft, Minus, Square, X, GitBranch, Folder, MessageCircle, FolderGit2 } from 'lucide-react'
+import { ChevronLeft, Minus, Square, X, GitBranch, Folder, MessageCircle, FolderGit2, ArrowUpCircle } from 'lucide-react'
 import { useStore, isGeneral } from '../store'
 import { projectName, shortPath, worktreeOf, modLabel, isPhone } from '../util'
 import { useEffect, useState } from 'react'
@@ -15,6 +15,32 @@ export function dotState(c: { status: string; unread: boolean; pending?: unknown
   if (c.pending?.length) return 'ask'
   if (c.status === 'running' || c.status === 'compacting') return 'busy'
   return c.unread ? 'on' : 'idle'
+}
+
+/** Muted "Update x.y.z" pill left of the gear; opens the release page, the x hides it for that version. */
+function UpdatePill() {
+  const update = useStore((s) => s.update)
+  const dismissed = useStore((s) => s.dismissedUpdate)
+  const dismissUpdate = useStore((s) => s.dismissUpdate)
+  if (isPhone || !update?.newer || !update.latest || update.latest === dismissed) return null
+  return (
+    <div className="no-drag">
+      <button className="update-pill" title={`Hearth ${update.latest} is available`} onClick={() => update.url && window.open(update.url)}>
+        <ArrowUpCircle size={13} />
+        <span>Update {update.latest}</span>
+        <span
+          className="update-pill-x"
+          title="Dismiss"
+          onClick={(e) => {
+            e.stopPropagation()
+            dismissUpdate()
+          }}
+        >
+          <X size={11} />
+        </span>
+      </button>
+    </div>
+  )
 }
 
 export default function TopBar() {
@@ -100,6 +126,7 @@ export default function TopBar() {
           <ContextMeter chat={chat} />
         </div>
       )}
+      <UpdatePill />
       <div className="no-drag">
         <SettingsPopover />
       </div>

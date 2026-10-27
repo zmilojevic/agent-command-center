@@ -317,6 +317,10 @@ export interface DesktopApi {
   warmCache(chatId: string): Promise<boolean>
   requestContext(chatId: string): Promise<void>
   getUsage(force?: boolean): Promise<PlanUsage | null>
+  checkUpdate(): Promise<UpdateInfo>
+  authStatus(): Promise<AuthStatus>
+  /** Starts `claude auth login` in a pty (data/exit via the pty events); resolves with its pty id. */
+  authLogin(): Promise<{ id?: string; error?: string }>
   /** Uncommitted changes (diff against HEAD plus untracked files) of the repo containing cwd. */
   gitChanges(cwd: string): Promise<GitChanges>
   notify(n: NotifyRequest): Promise<boolean>
@@ -400,6 +404,20 @@ export interface DesktopApi {
   onConnectionState?(cb: (s: 'connecting' | 'open' | 'closed') => void): () => void
   /** Model / permission mode changed from claude.ai. */
   onRemoteSetting(cb: (e: { chatId: string; model?: string; permissionMode?: PermissionMode }) => void): () => void
+}
+
+export interface UpdateInfo {
+  current: string
+  latest?: string
+  url?: string
+  newer: boolean
+  error?: string
+}
+
+export interface AuthStatus {
+  state: 'in' | 'out' | 'unknown'
+  method?: string
+  provider?: string
 }
 
 export interface PtyInfo {

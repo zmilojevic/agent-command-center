@@ -20,6 +20,8 @@ interface Term {
   total: number
   pending: string
   timer: NodeJS.Timeout | null
+  /** Login ptys run `claude auth login`; they are never listed as terminals. */
+  hidden: boolean
 }
 
 function pickShell(): { shell: string; args: string[] } {
@@ -41,8 +43,8 @@ export class PtyManager {
 
   constructor(private emit: (channel: string, payload: unknown) => void) {}
 
-  create(cwd: string, cols: number, rows: number): string {
-    const { shell, args } = pickShell()
+  create(cwd: string, cols: number, rows: number, run?: { command: string; args: string[]; kind: 'login' }): string {
+    const { shell, args } = run ? { shell: run.command, args: run.args } : pickShell()
     const env: Record<string, string> = {}
     for (const [k, v] of Object.entries(process.env)) {
       if (v === undefined || k.startsWith('ELECTRON_') || k.startsWith('CCD_') || k === 'CHROME_DESKTOP') continue
@@ -55,7 +57,7 @@ export class PtyManager {
     const dir = cwd && existsSync(cwd) ? cwd : homedir()
     const proc = pty.spawn(shell, args, { name: 'xterm-256color', cols: Math.max(2, cols), rows: Math.max(1, rows), cwd: dir, env })
     const id = `pty-${++this.seq}`
-    const t: Term = { id, cwd, shell: basename(shell).replace(/\.exe$/i, ''), proc, exited: false, ring: '', total: 0, pending: '', timer: null }
+    const t: Term = { id, cwd, shell: basename(shell).replace(/\.exe$/i, ''), proc, exited: false, ring: '', total: 0, pending: '', timer: null, hidden: run?.kind === 'login' }
     this.terms.set(id, t)
     proc.onData((d) => {
       t.ring += d
@@ -112,7 +114,7 @@ export class PtyManager {
   }
 
   list(): PtyInfo[] {
-    return [...this.terms.values()].map((t) => ({ id: t.id, cwd: t.cwd, pid: t.proc.pid, shell: t.shell, exited: t.exited, code: t.code }))
+    return [...this.terms.values()].filter((t) => !t.hidden).map((t) => ({ id: t.id, cwd: t.cwd, pid: t.proc.pid, shell: t.shell, exited: t.exited, code: t.code }))
   }
 
   /** True when the shell is the foreground process of its tty (idle prompt, no program running). */

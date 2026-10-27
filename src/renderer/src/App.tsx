@@ -13,6 +13,8 @@ import ChangesPanel from './components/ChangesPanel'
 import TerminalPanel from './components/TerminalPanel'
 import RightDock from './components/RightDock'
 import ToolStrip from './components/ToolStrip'
+import EmptyPane from './components/EmptyPane'
+import LoginDialog from './components/LoginDialog'
 import WorkflowsView from './components/workflows/WorkflowsView'
 import { initTerminals, focusTerminal, terminalHasFocus, setTerminalEscapeHandler } from './terminals'
 import { isPhone } from './util'
@@ -64,6 +66,7 @@ export default function App() {
   const terminalOpen = useStore((s) => s.terminalOpen)
   const workflowsRoot = useStore((s) => s.workflowsRoot)
   const agentView = useStore((s) => s.agentView)
+  const loginOpen = useStore((s) => s.loginOpen)
   const [agentModel, setAgentModel] = useState<string | undefined>()
 
   useEffect(() => {
@@ -76,6 +79,7 @@ export default function App() {
         focusComposer()
       })
       void useStore.getState().restoreTerminals()
+      void useStore.getState().checkAuth()
     }
     void window.desktop
       .chatsDir()
@@ -84,6 +88,23 @@ export default function App() {
       .then(loadSessions)
       .then(restoreTabs)
   }, [loadSessions, restoreTabs])
+
+  // Update notice: first look 15 s after startup, then every 6 h (the main process caches answers for 6 h too).
+  useEffect(() => {
+    if (isPhone) return
+    let timer: ReturnType<typeof setInterval> | undefined
+    const run = (): void => {
+      if (useStore.getState().updateCheck) void useStore.getState().checkUpdate()
+    }
+    const first = setTimeout(() => {
+      run()
+      timer = setInterval(run, 6 * 60 * 60 * 1000)
+    }, 15_000)
+    return () => {
+      clearTimeout(first)
+      if (timer) clearInterval(timer)
+    }
+  }, [])
 
   useEffect(
     () =>
@@ -249,6 +270,13 @@ export default function App() {
                   <Composer chatId={activeChatId} />
                 </>
               )}
+              {!activeChatId && !isPhone && (
+                <EmptyPane
+                  onNewChat={() => {
+                    void newGeneralChat().then(() => requestAnimationFrame(() => focusComposer()))
+                  }}
+                />
+              )}
             </ErrorBoundary>
           </div>}
           {!workflowsRoot && !isPhone && activeChatId && !generalActive && (
@@ -285,6 +313,7 @@ export default function App() {
         </div>
       </main>
       {showNewDialog && <NewSessionDialog />}
+      {loginOpen && !isPhone && <LoginDialog />}
       {isPhone && <ReconnectPill />}
     </div>
   )

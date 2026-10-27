@@ -16,6 +16,9 @@ import { launchTools, openInEditor, openTerminal } from './launch'
 import { RemoteManager } from './remote'
 import { MobileServer } from './mobile'
 import { PtyManager } from './pty'
+import { checkUpdate } from './updates'
+import { authStatus } from './auth'
+import { claudeBinary } from './claudeBin'
 import { CHATS_DIR } from './paths'
 import { setupTray, focusWindow } from './tray'
 import { workflowList, workflowRead, workflowSave, workflowDelete, workflowAgents } from './workflows'
@@ -293,6 +296,14 @@ handle('git:discardHunk', (_ctx, cwd: string, patch: string) => gitDiscardHunk(c
 handle('app:tools', () => launchTools())
 handle('app:openInEditor', (_ctx, path: string, line?: number, editorId?: string) => openInEditor(path, line, editorId))
 handle('app:openTerminal', (_ctx, dir: string, terminalId?: string) => openTerminal(dir, terminalId))
+// ---- IPC: updates and Claude login
+handle('app:checkUpdate', () => checkUpdate())
+handle('auth:status', () => authStatus())
+handle('auth:login', () => {
+  const bin = claudeBinary()
+  if (!bin) return { error: 'Claude CLI not found' }
+  return { id: ptys.create(homedir(), 80, 12, { command: bin, args: ['auth', 'login'], kind: 'login' }) }
+})
 // ---- IPC: integrated terminal
 handle('pty:create', (_ctx, cwd: string, cols: number, rows: number) => ptys.create(cwd, cols, rows))
 on('pty:write', (_ctx, id: string, data: string) => ptys.write(id, data))

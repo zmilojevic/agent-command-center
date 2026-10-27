@@ -1,0 +1,87 @@
+/* Update notice pill, gear-menu version line, login dialog and the empty-pane cards. */
+.update-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 6px 0 8px;
+  border: 1px solid var(--border-2);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.update-pill:hover {
+  border-color: var(--accent-muted);
+  color: var(--text);
+}
+.update-pill-x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  opacity: 0.6;
+}
+.update-pill-x:hover {
+  opacity: 1;
+  background: var(--border);
+}
+.version-line {
+  padding: 2px 0 0;
+}
+.version-line a {
+  color: var(--text-2);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.login-modal {
+  width: 600px;
+}
+.login-term {
+  height: 220px;
+  padding: 6px 0 6px 10px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.login-term .xterm {
+  height: 100%;
+}
+.login-term .xterm-viewport {
+  background-color: transparent !important;
+}
+.login-err {
+  color: var(--err);
+}
+
+.empty-card {
+  margin: auto;
+  width: min(520px, 100% - 48px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  text-align: center;
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.empty-card h2 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+.empty-card p {
+  margin: 0;
+}
+.empty-card-actions {
+  display: flex;
+  gap: 8px;
+}

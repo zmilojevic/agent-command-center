@@ -125,6 +125,8 @@ the same day. Renamed to Hearth on 2026-10-26 (repo folder stays `~/dev/agent-co
   `toggleTerminal/newTerminal/killTerminal/restoreTerminals`. `TerminalPanel` = header (title, tabs "zsh 1", "+", close) + xterm; opening for a
   folder without shells creates one; killing the last shell of the visible folder closes the panel. After a shell exits the view shows
   "[process exited with code N]" and the next keypress removes the tab. Styles: `styles/terminal.css`.
+- `src/main/updates.ts` – `checkUpdate()` (`app:checkUpdate`): GET the GitHub `releases/latest` of `zmilojevic/hearth` via `net.fetch` (10 s timeout), `UpdateInfo {current, latest, url, newer, error}`; numeric major.minor.patch compare, successes cached 6 h in memory, errors returned never thrown. Notice only, nothing is downloaded or installed. Renderer (desktop only): prefs `updateCheck` (default on) / `dismissedUpdate`, store `update`; checked 15 s after startup and every 6 h; TopBar `UpdatePill` ("Update x.y.z" left of the gear, click opens the release page, x dismisses that version); gear menu switch "Check for updates" (turning it on checks at once) with a muted `Hearth <current>` line (+ "<latest> available" link) once a check has answered; styles in `styles/updates-auth.css`.
+- `src/main/auth.ts` – `authStatus()` (`auth:status`): runs `<claude binary> auth status --json` (`claudeBinary()` in `claudeBin.ts` = packaged unpacked copy or the SDK's native binary in dev; no shell, 15 s) and parses stdout even on exit 1; `out` only for `loggedIn:false` with provider missing/`firstParty`, any failure = `unknown` (never blocks). `auth:login` starts `<binary> auth login` in a `PtyManager` pty created with `{command,args,kind:'login'}` (cwd home); such ptys are `hidden` = left out of `pty:list`, so `restoreTerminals` never makes tabs of them (data/exit/write/resize/kill reuse the pty channels). Renderer: store `auth` (`unknown|in|out`, `checkAuth()` at startup, set to `out` when a chat gets error `authentication_failed`), `loginOpen`/`openLogin()`; `LoginDialog` = modal with an xterm on the login pty (reuses `terminals.ts`), on pty exit re-checks auth and closes itself when logged in (forces `usage:get`), else offers Try again / Close. Offered from the `authentication_failed` error card ("Log in" button instead of the raw text) and from `EmptyPane`: with no active chat it shows a "Log in to get started" card when `auth === 'out'`, a first-run hint with New chat / Add project buttons only when nothing exists yet (no sessions, pinned projects or open chats), otherwise stays empty (no welcome screen once sessions exist). Both `auth:*` and `app:checkUpdate` are `PHONE_BLOCKED`; the phone skips all of it.
 - `src/main/git.ts` – `gitChanges(cwd)` (`git:changes`): uncommitted changes of the repo containing cwd = `git diff HEAD`
   (empty tree when there are no commits) split per file + untracked files via `git diff --no-index /dev/null`
   (≤ 200, > 1 MB shown as binary), diff text capped at 4 MB (`truncated`). Never through a shell.
@@ -136,12 +138,12 @@ the same day. Renamed to Hearth on 2026-10-26 (repo folder stays `~/dev/agent-co
   server's `rate_limits.limits[]` rows (fallback: `five_hour`/`seven_day`/`model_scoped`) into `PlanUsage`; polls every
   2 min and never more often (a forced `usage:get` only refetches when the cache is ≥ 2 min old), pushes `usage:changed`; `usage:get` returns the cache.
 - `src/preload/index.ts` – exposes `window.desktop` typed as `DesktopApi` in `src/shared/types.ts`.
-- Subagent view: clicking a subagent row under a chat in the sidebar sets store `agentView {chatId, toolUseId}` (cleared by any `activate`,
+- Subagent view: clicking a subagent row under a chat in the sidebar (running ones only) or the transcript button (`ScrollText`) in an Agent/Task tool card header sets store `agentView {chatId, toolUseId}` (cleared by any `activate`,
   `openWorkflows`, closing the chat, Esc or the header's back arrow) and the chat pane shows `AgentView` + `ReadOnlyComposer` (`components/AgentView.tsx`,
   `styles/agent-view.css`): the subagent's own transcript, read by `src/main/subagents.ts` (`subagent:transcript`) from
   `~/.claude/projects/<slug>/<sessionId>/subagents/agent-<id>.jsonl`, found via the sibling `agent-<id>.meta.json` whose `toolUseId` = the parent's
   Agent tool_use id. Polled every 1.5 s (mtime-gated) while running and for 10 s after (the CLI flushes the final line after the task's `completed`
-  event); `applyTranscript(…, {live})` keeps in-flight tools running. `MessageItem`/`ToolCard` `readOnly` hides parent-acting buttons; chat hotkeys
+  event); `applyTranscript(…, {live})` keeps in-flight tools running. Finished subagents are rebuilt from the parent transcript by `restoreFinishedAgents` (reduce.ts, after every main-chat `applyTranscript`; foreground = has a result, background = notification after the last (re)start; `hidden`, so the sidebar list is unchanged; `summary` = the notification's `<result>`), so old sessions open too; without an entry and a `found: false` answer AgentView says no transcript was saved and stops polling. `MessageItem`/`ToolCard` `readOnly` hides parent-acting buttons; chat hotkeys
   (Ctrl+W, Ctrl+K/L, Alt+Delete, Ctrl+F) are no-ops there.
 - `src/renderer/src/reduce.ts` – pure reducer: stream deltas, assistant frames (one block per frame when
   streaming; `finalized` index maps frames to streamed blocks), user tool_result frames, result, system
@@ -322,7 +324,6 @@ the same day. Renamed to Hearth on 2026-10-26 (repo folder stays `~/dev/agent-co
 ## Known gaps
 
 - macOS/Windows builds were never run by the author (only built in CI); no auto-update; unsigned by default; mac arm64 only.
-- Subagents tracked only for chats opened in the app, not reconstructed from old transcripts.
 - No rewind
   (candidate next features, in roughly that order of value).
 - Notification click → focus+activate chat is wired but was never exercised by a script.

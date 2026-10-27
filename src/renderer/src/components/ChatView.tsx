@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 import { useStore, isGeneral } from '../store'
 import MessageItem from './MessageItem'
 import PermissionCard from './PermissionCard'
-import { fmtCost, fmtDuration, fmtTokens } from '../util'
+import { fmtCost, fmtDuration, fmtTokens, isPhone } from '../util'
 import { AlertTriangle } from 'lucide-react'
 
 export default function ChatView({ chatId }: { chatId: string }) {
@@ -68,7 +68,17 @@ export default function ChatView({ chatId }: { chatId: string }) {
         )}
         {chat.error && (
           <div className="error-box">
-            <AlertTriangle size={14} /> <span>{chat.error}</span>
+            <AlertTriangle size={14} />{' '}
+            {chat.error === 'authentication_failed' && !isPhone ? (
+              <>
+                <span>Claude Code isn't logged in, or the login expired.</span>
+                <button className="btn" onClick={() => useStore.getState().openLogin()}>
+                  Log in
+                </button>
+              </>
+            ) : (
+              <span>{chat.error}</span>
+            )}
           </div>
         )}
         {chat.closed && (

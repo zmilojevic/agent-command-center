@@ -40,3 +40,8 @@ export function claudeExecutable(): string | undefined {
   if (existsSync(fixed)) cached = fixed
   return cached
 }
+
+/** The native `claude` binary to run CLI subcommands with (packaged: unpacked copy; dev: the SDK's own). */
+export function claudeBinary(): string | undefined {
+  return app.isPackaged ? claudeExecutable() : resolveNative()
+}

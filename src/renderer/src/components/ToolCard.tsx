@@ -20,6 +20,7 @@ import {
   Sparkles,
   ClipboardList,
   SquareTerminal,
+  ScrollText,
 } from 'lucide-react'
 import type { ToolBlock, Subagent } from '../reduce'
 import { toolSummary } from '../reduce'
@@ -62,7 +63,7 @@ export function subagentLine(a: Subagent, now: number): string {
   const parts: string[] = []
   if (a.status === 'running') parts.push(a.activity || (a.lastTool ? `Using ${a.lastTool}` : 'Starting'))
   else parts.push(a.status === 'done' ? 'Finished' : 'Failed')
-  parts.push(a.toolCalls === 1 ? '1 tool call' : `${a.toolCalls} tool calls`)
+  if (!a.restored) parts.push(a.toolCalls === 1 ? '1 tool call' : `${a.toolCalls} tool calls`)
   parts.push(fmtElapsed((a.endedAt ?? now) - a.startedAt))
   return parts.join(' · ')
 }
@@ -293,6 +294,19 @@ export default function ToolCard({ chatId, block, pending, readOnly }: { chatId:
             }}
           >
             <SquareTerminal size={13} />
+          </span>
+        )}
+        {isAgent && !readOnly && (!!block.result || !!agent) && (
+          <span
+            className="run-term-btn"
+            role="button"
+            title="Open subagent transcript"
+            onClick={(e) => {
+              e.stopPropagation()
+              useStore.getState().openAgentView(chatId, block.id)
+            }}
+          >
+            <ScrollText size={13} />
           </span>
         )}
         {agent && <span className="agent-live">{subagentLine(agent, now)}</span>}

@@ -48,6 +48,8 @@ export interface Subagent {
   seen?: string[]
   /** No longer listed in the sidebar: the main turn that ran it is over. */
   hidden?: boolean
+  /** Rebuilt from a stored transcript: the tool-call count is unknown. */
+  restored?: boolean
 }
 
 export interface BgTask {
@@ -369,15 +371,19 @@ function entryText(content: unknown): string {
     .join('\n')
 }
 
-/**
- * Renderer-only fallback for restoreLive: a background subagent whose latest launch (or SendMessage resume) has no
- * task-notification after it is still running. Rebuilt from the parent transcript so a reload against a main process
- * with no (or a truncated) replay keeps the sidebar rows. Call only when the runner is live.
- */
-export function restoreBackgroundAgents(model: ChatModel, entries: TranscriptMessage[]): void {
-  const calls = new Map<string, { description: string; type?: string; at?: number }>()
-  /** toolUseId -> agent id and whether it is currently running. */
-  const bg = new Map<string, { taskId: string; running: boolean }>()
+interface AgentScan {
+  description: string
+  type?: string
+  at?: number
+  /** Foreground result (anything but an "Async agent launched" ack). */
+  result?: { isError: boolean; at?: number }
+  /** Background launch: agent id, whether the latest (re)start has no notification yet, and the last notification. */
+  bg?: { taskId: string; running: boolean; note?: { status: string; summary?: string; result?: string; at?: number } }
+}
+
+/** Scans main-thread entries for Agent/Task calls with their results, background launches, SendMessage restarts and task-notifications. */
+function scanAgents(entries: TranscriptMessage[]): Map<string, AgentScan> {
+  const calls = new Map<string, AgentScan>()
   const ts = (e: any): number | undefined => {
     const t = typeof e.timestamp === 'string' ? Date.parse(e.timestamp) : typeof e.timestamp === 'number' ? e.timestamp : NaN
     return Number.isFinite(t) ? t : undefined
@@ -391,16 +397,23 @@ export function restoreBackgroundAgents(model: ChatModel, entries: TranscriptMes
         if (AGENT_TOOLS.has(c.name)) {
           calls.set(c.id, { description: String(c.input?.description ?? ''), type: c.input?.subagent_type ? String(c.input.subagent_type) : undefined, at: ts(e) })
         } else if (c.name === 'SendMessage' && typeof c.input?.to === 'string') {
-          for (const x of bg.values()) if (x.taskId === c.input.to) x.running = true
+          for (const x of calls.values()) {
+            if (x.bg && x.bg.taskId === c.input.to) {
+              x.bg.running = true
+              x.bg.note = undefined
+            }
+          }
         }
       }
     } else if (e.type === 'user') {
       if (Array.isArray(content)) {
         for (const c of content) {
-          if (c?.type !== 'tool_result' || !calls.has(c.tool_use_id)) continue
+          const call = c?.type === 'tool_result' ? calls.get(c.tool_use_id) : undefined
+          if (!call) continue
           const text = entryText(c.content)
           const id = text.startsWith('Async agent launched') ? /agentId:\s*([A-Za-z0-9_-]+)/.exec(text)?.[1] : undefined
-          if (id) bg.set(c.tool_use_id, { taskId: id, running: true })
+          if (id) call.bg = { taskId: id, running: true }
+          else if (!text.startsWith('Async agent launched')) call.result = { isError: !!c.is_error, at: ts(e) }
         }
       }
       const text = entryText(content)
@@ -408,13 +421,29 @@ export function restoreBackgroundAgents(model: ChatModel, entries: TranscriptMes
       for (const m of text.matchAll(/<task-notification>([\s\S]*?)<\/task-notification>|<task-notification>[\s\S]*$/g)) {
         const taskId = /<task-id>([^<]+)<\/task-id>/.exec(m[0])?.[1]?.trim()
         const toolUseId = /<tool-use-id>([^<]+)<\/tool-use-id>/.exec(m[0])?.[1]?.trim()
-        for (const [id, x] of bg) if ((taskId && x.taskId === taskId) || (toolUseId && id === toolUseId)) x.running = false
+        const status = /<status>([^<]+)<\/status>/.exec(m[0])?.[1]?.trim() ?? 'completed'
+        const summary = /<summary>([\s\S]*?)<\/summary>/.exec(m[0])?.[1]?.trim()
+        const result = /<result>([\s\S]*?)(?:<\/result>|$)/.exec(m[0])?.[1]?.trim()
+        for (const [id, x] of calls) {
+          if (!x.bg || !((taskId && x.bg.taskId === taskId) || (toolUseId && id === toolUseId))) continue
+          x.bg.running = false
+          x.bg.note = { status, summary, result, at: ts(e) }
+        }
       }
     }
   }
-  for (const [toolUseId, x] of bg) {
-    if (!x.running) continue
-    const call = calls.get(toolUseId)!
+  return calls
+}
+
+/**
+ * Renderer-only fallback for restoreLive: a background subagent whose latest launch (or SendMessage resume) has no
+ * task-notification after it is still running. Rebuilt from the parent transcript so a reload against a main process
+ * with no (or a truncated) replay keeps the sidebar rows. Call only when the runner is live.
+ */
+export function restoreBackgroundAgents(model: ChatModel, entries: TranscriptMessage[]): void {
+  for (const [toolUseId, call] of scanAgents(entries)) {
+    const x = call.bg
+    if (!x?.running) continue
     let a = findSubagent(model, { toolUseId, taskId: x.taskId })
     if (!a) {
       a = { toolUseId, description: call.description, status: 'running', startedAt: call.at ?? Date.now(), toolCalls: 0 }
@@ -425,6 +454,35 @@ export function restoreBackgroundAgents(model: ChatModel, entries: TranscriptMes
     a.hidden = false
     if (!a.description) a.description = call.description
     if (!a.type && call.type) a.type = call.type
+  }
+}
+
+/**
+ * Rebuilds finished subagents (hidden from the sidebar) from a stored main-thread transcript so their own transcript
+ * can be opened later and their tool cards show facts. Existing entries are never touched.
+ */
+export function restoreFinishedAgents(model: ChatModel, entries: TranscriptMessage[]): void {
+  for (const [toolUseId, call] of scanAgents(entries)) {
+    const bg = call.bg
+    let status: 'done' | 'failed'
+    let endedAt: number | undefined
+    let summary: string | undefined
+    if (bg) {
+      if (bg.running || !bg.note) continue
+      status = bg.note.status === 'completed' ? 'done' : 'failed'
+      endedAt = bg.note.at
+      summary = bg.note.result || bg.note.summary
+    } else if (call.result) {
+      status = call.result.isError ? 'failed' : 'done'
+      endedAt = call.result.at
+    } else continue
+    if (findSubagent(model, { toolUseId, taskId: bg?.taskId })) continue
+    const a: Subagent = { toolUseId, description: call.description, status, startedAt: call.at ?? endedAt ?? Date.now(), toolCalls: 0, hidden: true, restored: true }
+    if (call.type) a.type = call.type
+    if (bg) a.taskId = bg.taskId
+    if (endedAt != null) a.endedAt = endedAt
+    if (summary) a.summary = summary
+    model.subagents.push(a)
   }
 }
 
@@ -474,6 +532,7 @@ function applySystem(model: ChatModel, m: any): void {
         a.summary = undefined
         a.startedAt = Date.now()
         a.toolCalls = 0
+        a.restored = undefined
         a.tokens = undefined
       }
       a.taskId = m.task_id
