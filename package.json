@@ -1,6 +1,6 @@
 {
   "name": "hearth",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "desktopName": "hearth.desktop",
   "description": "Hearth: desktop app for Claude Code sessions, built on the Claude Agent SDK",
   "main": "./out/main/index.js",
