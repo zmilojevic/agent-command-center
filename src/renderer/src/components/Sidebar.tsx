@@ -390,6 +390,14 @@ export default function Sidebar() {
   const quickChat = (cwd: string): void => {
     void newChat({ cwd, permissionMode: lastMode })
   }
+  const expandGroup = (g: Group): void => {
+    setCollapsed({ ...collapsed, [g.cwd]: false })
+    if (g.sessions.length === 0 && !search.trim()) {
+      if (g.general) void newGeneralChat()
+      else quickChat(g.cwd)
+      requestAnimationFrame(() => focusComposer())
+    }
+  }
 
   useEffect(() => {
     if (!menu && !groupMenu) return
@@ -504,7 +512,7 @@ export default function Sidebar() {
       case 'ArrowRight':
         if (!g) return
         e.preventDefault()
-        if (isHead && isCollapsedGroup(g)) setCollapsed({ ...collapsed, [g.cwd]: false })
+        if (isHead && isCollapsedGroup(g)) expandGroup(g)
         else if (isHead) items[i + 1]?.classList.contains('row') && items[i + 1].focus()
         return
       case 'ArrowLeft':
@@ -517,7 +525,8 @@ export default function Sidebar() {
       case ' ':
         if (isHead && g) {
           e.preventDefault()
-          setCollapsed({ ...collapsed, [g.cwd]: !isCollapsedGroup(g) })
+          if (isCollapsedGroup(g)) expandGroup(g)
+          else setCollapsed({ ...collapsed, [g.cwd]: true })
         }
         return
       case 'Delete': {
@@ -773,7 +782,7 @@ export default function Sidebar() {
                   setDragging(null)
                   setDragOver(null)
                 }}
-                onClick={() => setCollapsed({ ...collapsed, [g.cwd]: !isCollapsed })}
+                onClick={() => (isCollapsed ? expandGroup(g) : setCollapsed({ ...collapsed, [g.cwd]: true }))}
                 onContextMenu={(e) => {
                   e.preventDefault()
                   setGroupMenu({ x: e.clientX, y: e.clientY, g })
