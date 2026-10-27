@@ -1,6 +1,6 @@
 pkgbase = hearth-bin
 	pkgdesc = Desktop app for Claude Code sessions, built on the Claude Agent SDK (prebuilt release)
-	pkgver = 0.1.0
+	pkgver = 0.1.1
 	pkgrel = 1
 	url = https://github.com/zmilojevic/hearth
 	arch = x86_64
@@ -22,12 +22,12 @@ pkgbase = hearth-bin
 	optdepends = libappindicator-gtk3: tray icon on some desktops
 	provides = hearth
 	conflicts = hearth
-	noextract = hearth-0.1.0-linux-amd64.deb
+	noextract = hearth-0.1.1-linux-amd64.deb
 	options = !strip
 	options = !debug
-	source = hearth-0.1.0-linux-amd64.deb::https://github.com/zmilojevic/hearth/releases/download/v0.1.0/hearth-0.1.0-linux-amd64.deb
-	source = LICENSE-0.1.0::https://raw.githubusercontent.com/zmilojevic/hearth/v0.1.0/LICENSE
-	sha256sums = 0087e59ec0ba651018d1d9f05f0271805ec01b81fe5f084c478dca0c1789fdf3
+	source = hearth-0.1.1-linux-amd64.deb::https://github.com/zmilojevic/hearth/releases/download/v0.1.1/hearth-0.1.1-linux-amd64.deb
+	source = LICENSE-0.1.1::https://raw.githubusercontent.com/zmilojevic/hearth/v0.1.1/LICENSE
+	sha256sums = 180f60fbaf3adacebcde359383ff0cdfb40620635c0e63a62f63c12c65059fa1
 	sha256sums = cab4070ebe087ed1756818af8752bbafd28cad0f2b8f21b27183f0bbbc811a1e
 
 pkgname = hearth-bin

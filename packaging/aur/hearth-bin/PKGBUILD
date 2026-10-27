@@ -1,7 +1,7 @@
 # Maintainer: Zeljko Milojevic <zmilojevic@users.noreply.github.com>
 pkgname=hearth-bin
 _name=hearth
-pkgver=0.1.0
+pkgver=0.1.1
 pkgrel=1
 pkgdesc='Desktop app for Claude Code sessions, built on the Claude Agent SDK (prebuilt release)'
 arch=('x86_64')
@@ -18,7 +18,7 @@ _deb="$_name-$pkgver-linux-amd64.deb"
 source=("$_deb::$url/releases/download/v$pkgver/$_deb"
         "LICENSE-$pkgver::https://raw.githubusercontent.com/zmilojevic/hearth/v$pkgver/LICENSE")
 noextract=("$_deb")
-sha256sums=('0087e59ec0ba651018d1d9f05f0271805ec01b81fe5f084c478dca0c1789fdf3'
+sha256sums=('180f60fbaf3adacebcde359383ff0cdfb40620635c0e63a62f63c12c65059fa1'
             'cab4070ebe087ed1756818af8752bbafd28cad0f2b8f21b27183f0bbbc811a1e')
 
 prepare() {

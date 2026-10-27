@@ -4,7 +4,7 @@
 It runs on the Claude Agent SDK and your existing Claude Code login: no API key, same subscription, same
 settings, same sessions as the CLI.
 
-![Hearth: sessions sidebar, a chat with tool cards and the git changes panel](docs/screenshots/main-dark.png)
+![Hearth demo: open a chat, ask for a change, review the diff in the changes panel, run it in the built-in terminal](docs/screenshots/demo.gif)
 
 > Unofficial community project, not affiliated with or endorsed by Anthropic.
 
@@ -44,6 +44,8 @@ that experience on Linux, plus a few things aimed at people who keep many sessio
   ([docs/mobile.md](docs/mobile.md)).
 - **Desktop**: notifications (with its own chime) when a turn ends or Claude needs you, tray icon (closing hides to tray), light / dark /
   system theme, keyboard-driven sidebar.
+
+![Hearth: sessions sidebar, a chat with tool cards and the git changes panel](docs/screenshots/main-dark.png)
 
 ![Light theme with the context window breakdown](docs/screenshots/context-light.png)
 
