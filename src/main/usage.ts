@@ -60,12 +60,18 @@ export function normalizeUsage(res: unknown, now = Date.now()): PlanUsage {
   }
 }
 
-/** Plan usage is polled at this interval and never fetched more often. */
-const MIN_INTERVAL_MS = 2 * 60_000
+/** Never fetch more often than this (also the forced-refresh threshold). */
+const MIN_INTERVAL_MS = 10 * 60_000
+/** Refetch at least this often even without transcript activity. */
+const IDLE_INTERVAL_MS = 60 * 60_000
+const BACKOFF_MAX_MS = 60 * 60_000
 
 export class UsageService {
   private last: PlanUsage | null = null
   private inflight: Promise<PlanUsage | null> | null = null
+  private lastActivityAt = 0
+  private failures = 0
+  private nextAllowedAt = 0
 
   constructor(
     private runners: RunnerRegistry,
@@ -75,12 +81,32 @@ export class UsageService {
 
   start(): void {
     void this.refresh()
-    setInterval(() => void this.refresh(), MIN_INTERVAL_MS).unref?.()
+    setInterval(() => this.tick(), 60_000).unref?.()
   }
 
-  /** Cached value; fetches only when nothing is cached yet, or when forced and the cache is >= MIN_INTERVAL_MS old. */
+  /** Records that transcripts changed (a session did something); cheap, never fetches. */
+  noteActivity(): void {
+    this.lastActivityAt = Date.now()
+  }
+
+  private tick(): void {
+    const now = Date.now()
+    if (now < this.nextAllowedAt) return
+    const last = this.last
+    if (!last) {
+      void this.refresh()
+      return
+    }
+    const age = now - last.fetchedAt
+    const hasRows = last.rows.length > 0
+    if ((hasRows && this.lastActivityAt > last.fetchedAt && age >= MIN_INTERVAL_MS) || age >= IDLE_INTERVAL_MS || (!hasRows && !!last.error)) void this.refresh()
+  }
+
+  /** Cached value; fetches only when nothing is cached (outside backoff), or when forced, >= MIN_INTERVAL_MS old and outside backoff. */
   get(force: boolean): Promise<PlanUsage | null> {
-    if (!this.last || (force && Date.now() - this.last.fetchedAt >= MIN_INTERVAL_MS)) return this.refresh()
+    const now = Date.now()
+    const ok = now >= this.nextAllowedAt
+    if (ok && (!this.last || (force && now - this.last.fetchedAt >= MIN_INTERVAL_MS))) return this.refresh()
     return Promise.resolve(this.last)
   }
 
@@ -88,13 +114,19 @@ export class UsageService {
     if (this.inflight) return this.inflight
     const p = this.fetchOnce()
       .then((u) => {
+        if (!u.available && u.rows.length === 0 && (this.last?.rows.length ?? 0) > 0) throw new Error('Usage response had no limits')
+        this.failures = 0
+        this.nextAllowedAt = 0
         this.last = u
         this.push(u)
         return u
       })
       .catch((e) => {
         const msg = e instanceof Error ? e.message : String(e)
-        this.log(`usage: ${msg}`)
+        this.failures++
+        const wait = Math.min(MIN_INTERVAL_MS * 2 ** (this.failures - 1), BACKOFF_MAX_MS)
+        this.nextAllowedAt = Date.now() + wait
+        this.log(`usage: ${msg}; next try in ${Math.round(wait / 60_000)} min`)
         this.last = { available: false, subscription: null, rows: [], ...this.last, fetchedAt: this.last?.fetchedAt ?? Date.now(), error: msg }
         this.push(this.last)
         return this.last

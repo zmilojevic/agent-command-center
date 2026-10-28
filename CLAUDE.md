@@ -136,8 +136,11 @@ the same day. Renamed to Hearth on 2026-10-26 (repo folder stays `~/dev/agent-co
 - `src/main/usage.ts` – `UsageService`: plan rate limits via the SDK's
   `usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({skipBehaviors:true})` on any live runner, else on a
   temporary idle `query()` (cwd home, `persistSession:false`; ~0.5 s, no tokens, no transcript). Normalizes the
-  server's `rate_limits.limits[]` rows (fallback: `five_hour`/`seven_day`/`model_scoped`) into `PlanUsage`; polls every
-  2 min and never more often (a forced `usage:get` only refetches when the cache is ≥ 2 min old), pushes `usage:changed`; `usage:get` returns the cache.
+  server's `rate_limits.limits[]` rows (fallback: `five_hour`/`seven_day`/`model_scoped`) into `PlanUsage`; polling is
+  activity-gated (Anthropic rate-limits this endpoint and then neither Hearth nor the waybar module can show usage): a 1-min tick fetches only
+  ≥ 10 min after the last fetch AND transcript activity (`noteActivity()` from the `~/.claude/projects` watcher), else hourly; errors back off
+  exponentially (10 min doubling, max 60 min, no fetch at all meanwhile); an empty response after earlier good rows counts as a failure; the last good
+  values are kept on error (`error` is just added); a forced `usage:get` only refetches when the cache is ≥ 10 min old; pushes `usage:changed`; `usage:get` returns the cache.
 - `src/preload/index.ts` – exposes `window.desktop` typed as `DesktopApi` in `src/shared/types.ts`.
 - Subagent view: clicking a subagent row under a chat in the sidebar (running ones only) or the transcript button (`ScrollText`) in an Agent/Task tool card header sets store `agentView {chatId, toolUseId}` (cleared by any `activate`,
   `openWorkflows`, closing the chat, Esc or the header's back arrow) and the chat pane shows `AgentView` + `ReadOnlyComposer` (`components/AgentView.tsx`,

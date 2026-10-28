@@ -340,6 +340,7 @@ function watchSessions(): void {
   if (!existsSync(dir)) return
   let timer: NodeJS.Timeout | null = null
   const ping = (): void => {
+    usageService?.noteActivity()
     if (timer) clearTimeout(timer)
     timer = setTimeout(() => emit('sessions:changed', null), 800)
   }
