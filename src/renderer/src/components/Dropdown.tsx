@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { ChevronDown, Check } from 'lucide-react'
 import type React from 'react'
 
@@ -6,6 +6,8 @@ export interface DropdownOption {
   value: string
   label: string
   description?: string
+  /** Options with a new section value get a muted header before them (not selectable, skipped by the keyboard). */
+  section?: string
 }
 
 export default function Dropdown({
@@ -88,9 +90,10 @@ export default function Dropdown({
       {open && (
         <div ref={menuRef} className={`dd-menu ${placement === 'up' ? 'dd-up' : 'dd-down'}`} role="listbox">
           {options.map((o, i) => (
+            <Fragment key={o.value}>
+              {o.section && o.section !== options[i - 1]?.section && <div className="dd-section">{o.section}</div>}
             <button
               type="button"
-              key={o.value}
               role="option"
               aria-selected={o.value === value}
               className={`dd-item ${o.value === value ? 'selected' : ''} ${i === hi ? 'hi' : ''}`}
@@ -106,6 +109,7 @@ export default function Dropdown({
               </span>
               {o.value === value && <Check size={13} className="dd-check" />}
             </button>
+            </Fragment>
           ))}
         </div>
       )}

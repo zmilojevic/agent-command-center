@@ -111,6 +111,9 @@ html[data-client='mobile'],
 [data-client='mobile'] .msg {
   gap: 8px;
 }
+[data-client='mobile'] .msg.assistant .avatar {
+  margin-left: 0;
+}
 [data-client='mobile'] .msg.user .bubble {
   max-width: 90%;
   padding: 9px 13px;

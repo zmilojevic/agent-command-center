@@ -6,6 +6,7 @@ import { useStore } from '../store'
 import DiffView from './DiffView'
 import QuestionCard from './QuestionCard'
 import PlanCard from './PlanCard'
+import PatchView from './PatchView'
 
 const VERBS: Record<string, string> = {
   Bash: 'run a command',
@@ -17,6 +18,7 @@ const VERBS: Record<string, string> = {
   WebSearch: 'search the web',
   Agent: 'start a subagent',
   Task: 'start a subagent',
+  ApplyPatch: 'apply a patch',
 }
 
 export default function PermissionCard({ request }: { request: PermissionRequest }) {
@@ -24,6 +26,8 @@ export default function PermissionCard({ request }: { request: PermissionRequest
   const [feedback, setFeedback] = useState('')
   const [showFeedback, setShowFeedback] = useState(false)
   const i = request.input as any
+  const codex = useStore((st) => st.chats[request.chatId]?.engine === 'codex')
+  const agentName = codex ? 'Codex' : 'Claude'
 
   if (request.toolName === 'AskUserQuestion') return <QuestionCard request={request} />
   if (request.toolName === 'ExitPlanMode') return <PlanCard request={request} />
@@ -61,6 +65,8 @@ export default function PermissionCard({ request }: { request: PermissionRequest
             <pre className="code">{String(i.content ?? '').slice(0, 4000)}</pre>
           </>
         )
+      case 'ApplyPatch':
+        return <PatchView chatId={request.chatId} input={request.input} />
       case 'Read':
         return <div className="perm-desc mono">{i.file_path}</div>
       case 'WebFetch':
@@ -75,7 +81,7 @@ export default function PermissionCard({ request }: { request: PermissionRequest
       <div className="perm-head">
         <ShieldAlert size={15} />
         <span>
-          Claude wants to {VERBS[request.toolName] ?? `use ${request.toolName}`}
+          {agentName} wants to {VERBS[request.toolName] ?? `use ${request.toolName}`}
         </span>
       </div>
       {request.decisionReason && <div className="perm-reason muted small">{request.decisionReason}</div>}
@@ -83,7 +89,7 @@ export default function PermissionCard({ request }: { request: PermissionRequest
       {showFeedback && (
         <textarea
           className="perm-feedback"
-          placeholder="Tell Claude what to do instead (optional)"
+          placeholder={`Tell ${agentName} what to do instead (optional)`}
           value={feedback}
           onChange={(e) => setFeedback(e.target.value)}
           autoFocus
@@ -95,8 +101,8 @@ export default function PermissionCard({ request }: { request: PermissionRequest
           Allow once
         </button>
         {request.canRemember && (
-          <button className="btn" onClick={() => allow(true)} title="Adds a rule to .claude/settings.local.json">
-            Always allow
+          <button className="btn" onClick={() => allow(true)} title={codex ? 'Stops asking for this kind of action until the chat ends' : 'Adds a rule to .claude/settings.local.json'}>
+            {codex ? 'Allow for session' : 'Always allow'}
           </button>
         )}
         {!showFeedback ? (

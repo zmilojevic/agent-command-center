@@ -1,4 +1,5 @@
 :root {
+  --chat-shift: 50px;
   --bg: #faf9f5;
   --bg-2: #f3f1ea;
   --surface: #ffffff;
@@ -814,11 +815,16 @@ kbd {
   flex: 1;
   overflow-y: auto;
   min-height: 0;
+  scrollbar-gutter: stable;
 }
 .chat-col {
-  max-width: 1032px;
-  margin: 0 auto;
-  padding: 28px 24px 12px;
+  /* column sits --chat-shift left of centre; clamps to the left edge when narrow.
+     Content is 1022px = composer width minus 10px (5px inset each side); the right
+     padding is 10px smaller because the stable scrollbar gutter takes 10px. */
+  max-width: 1070px;
+  margin-left: max(0px, calc((100% - 1070px) / 2 - var(--chat-shift)));
+  margin-right: auto;
+  padding: 28px 19px 12px 29px;
   display: flex;
   flex-direction: column;
   gap: 18px;
@@ -868,7 +874,11 @@ kbd {
 .msg.assistant.cont {
   margin-top: -10px;
 }
+.msg.assistant {
+  gap: 13px;
+}
 .msg.assistant .avatar {
+  margin-left: -25px;
   width: 26px;
   height: 26px;
   border-radius: 50%;
@@ -1465,7 +1475,8 @@ pre.diff {
 }
 .composer {
   max-width: 1032px;
-  margin: 0 auto;
+  margin-left: max(0px, calc((100% - 1032px) / 2 - var(--chat-shift)));
+  margin-right: auto;
   background: var(--surface);
   border: 1px solid var(--border-2);
   border-radius: 16px;
@@ -1567,6 +1578,18 @@ pre.diff {
 }
 .dd-item.selected {
   color: var(--text);
+}
+.dd-section {
+  padding: 8px 10px 3px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-3, var(--muted));
+  cursor: default;
+  user-select: none;
+}
+.dd-section:first-child {
+  padding-top: 3px;
 }
 .dd-item-text {
   display: flex;
@@ -1879,7 +1902,9 @@ pre.diff {
 }
 .queue {
   max-width: 1032px;
-  margin: 0 auto 6px;
+  margin-bottom: 6px;
+  margin-left: max(0px, calc((100% - 1032px) / 2 - var(--chat-shift)));
+  margin-right: auto;
   display: flex;
   flex-direction: column;
   gap: 4px;

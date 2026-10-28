@@ -21,6 +21,7 @@ import {
   ClipboardList,
   SquareTerminal,
   ScrollText,
+  FileDiff,
 } from 'lucide-react'
 import type { ToolBlock, Subagent } from '../reduce'
 import { toolSummary } from '../reduce'
@@ -32,6 +33,7 @@ import Markdown from './Markdown'
 import type { PermissionRequest } from '@shared/types'
 import DiffView from './DiffView'
 import PermissionCard from './PermissionCard'
+import PatchView from './PatchView'
 
 const ICONS: Record<string, typeof Terminal> = {
   Bash: Terminal,
@@ -46,6 +48,7 @@ const ICONS: Record<string, typeof Terminal> = {
   Agent: Bot,
   Task: Bot,
   TodoWrite: ListTodo,
+  ApplyPatch: FileDiff,
   AskUserQuestion: MessageCircleQuestion,
   Skill: Sparkles,
   ExitPlanMode: ClipboardList,
@@ -186,6 +189,13 @@ export default function ToolCard({ chatId, block, pending, readOnly }: { chatId:
         return (
           <>
             <pre className="code">{clip(String(i.content ?? ''))}</pre>
+            {block.result?.isError && <pre className="code out err">{clip(block.result.text)}</pre>}
+          </>
+        )
+      case 'ApplyPatch':
+        return (
+          <>
+            <PatchView chatId={chatId} input={block.input} />
             {block.result?.isError && <pre className="code out err">{clip(block.result.text)}</pre>}
           </>
         )

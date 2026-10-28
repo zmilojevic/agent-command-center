@@ -48,6 +48,7 @@ export default function TopBar() {
   const activeChatId = useStore((s) => s.activeChatId)
   const sessions = useStore((s) => s.sessions)
   const projectNames = useStore((s) => s.projectNames)
+  const showCodexUsage = useStore((s) => !!(s.codexStatus?.installed && s.codexStatus.loggedIn && s.codexUsage?.available))
   const toggleChanges = useStore((s) => s.toggleChanges)
   const changes = useStore((s) => {
     const c = s.activeChatId ? s.chats[s.activeChatId] : undefined
@@ -92,7 +93,8 @@ export default function TopBar() {
     <header className="topbar drag">
       <div className="no-drag usage-pair" style={{ marginLeft: 8 }}>
         {historyBtn}
-        <UsageMeter />
+        <UsageMeter label={showCodexUsage} />
+        {showCodexUsage && <UsageMeter codex label />}
       </div>
       <div className="grow" />
       {chat && general && (
@@ -124,7 +126,7 @@ export default function TopBar() {
           )}
         </div>
       )}
-      {chat && !general && (
+      {chat && !general && chat.engine !== 'codex' && (
         <div className="no-drag">
           <McpPopover chat={chat} />
         </div>

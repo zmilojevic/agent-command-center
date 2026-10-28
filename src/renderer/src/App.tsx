@@ -68,6 +68,7 @@ export default function App() {
   const workflowsRoot = useStore((s) => s.workflowsRoot)
   const agentView = useStore((s) => s.agentView)
   const loginOpen = useStore((s) => s.loginOpen)
+  const loginProvider = useStore((s) => s.loginProvider)
   const usageHistoryOpen = useStore((s) => s.usageHistoryOpen)
   const [agentModel, setAgentModel] = useState<string | undefined>()
 
@@ -83,6 +84,7 @@ export default function App() {
       void useStore.getState().restoreTerminals()
       void useStore.getState().checkAuth()
     }
+    void useStore.getState().checkCodex()
     void window.desktop
       .chatsDir()
       .then((dir) => useStore.setState({ generalDir: dir }))
@@ -315,7 +317,7 @@ export default function App() {
         </div>
       </main>
       {showNewDialog && <NewSessionDialog />}
-      {loginOpen && !isPhone && <LoginDialog />}
+      {loginOpen && !isPhone && <LoginDialog provider={loginProvider} />}
       {usageHistoryOpen && <UsageHistoryDialog />}
       {isPhone && <ReconnectPill />}
     </div>

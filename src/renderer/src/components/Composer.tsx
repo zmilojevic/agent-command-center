@@ -3,9 +3,10 @@ import { ArrowUp, Square, Eraser, X, Clock, ImagePlus, CornerDownLeft, Flame, Sn
 import Dropdown from './Dropdown'
 import ImageThumb from './ImageThumb'
 import TasksStrip from './TasksStrip'
-import { useStore, isGeneral } from '../store'
-import { EFFORT_LEVELS, PERMISSION_MODES, type PermissionMode, type SlashCommandInfo, type AgentChoice } from '@shared/types'
-import { modelLabel, fmtTokens, modLabel, isPhone, defaultContextWindow } from '../util'
+import { AgentsMdCard } from './CodexCards'
+import { useStore, isGeneral, codexInstalled } from '../store'
+import { EFFORT_LEVELS, PERMISSION_MODES, CODEX_MODES, type CodexMode, type PermissionMode, type SlashCommandInfo, type AgentChoice } from '@shared/types'
+import { latestModels, modelLabel, fmtTokens, modLabel, isPhone, defaultContextWindow } from '../util'
 import { dataUrl, readImages } from '../images'
 
 const FALLBACK_MODELS: { value: string; displayName: string; description?: string }[] = [
@@ -145,11 +146,16 @@ export default function Composer({ chatId }: { chatId: string }) {
   const remoteWanted = useStore((s) => (chat?.sessionId ? s.remoteSessions.includes(chat.sessionId) : false))
   const remote = useStore((s) => s.remote[chatId])
   const sid = chat?.sessionId
+  const codex = chat?.engine === 'codex'
+  const codexModels = useStore((s) => s.codexModels)
+  const codexLoggedIn = useStore((s) => !!s.codexStatus?.loggedIn)
+  const codexReady = useStore((s) => !!s.codexStatus?.installed)
+  const newChat = useStore((s) => s.newChat)
   const lastAt = useStore((s) => (sid ? s.chats[chatId]?.lastResponseAt || s.meta[sid]?.lastAt || 0 : 0))
   const warmedAt = useStore((s) => (sid ? s.warmedAt[sid] ?? 0 : 0))
   const cacheTtl = useStore((s) => (sid ? s.meta[sid]?.cacheTtlMs : undefined) ?? 300_000)
   const cacheBusy = chat?.status === 'running' || chat?.status === 'compacting'
-  const coldAt = lastAt ? Math.max(lastAt, warmedAt) + cacheTtl : 0
+  const coldAt = !codex && lastAt ? Math.max(lastAt, warmedAt) + cacheTtl : 0
   const [, setColdTick] = useState(0)
   useEffect(() => {
     if (!coldAt || cacheBusy) return
@@ -195,7 +201,7 @@ export default function Composer({ chatId }: { chatId: string }) {
   }, [chat?.draft])
 
   const draft = chat?.draft ?? ''
-  const slashQuery = /^\/\S*$/.test(draft) ? draft.slice(1) : null
+  const slashQuery = !codex && /^\/\S*$/.test(draft) ? draft.slice(1) : null
 
   const allCommands = useMemo<SlashCommandInfo[]>(() => {
     if (!chat) return []
@@ -212,7 +218,7 @@ export default function Composer({ chatId }: { chatId: string }) {
   const slashOpen = slashQuery != null && !dismissed && matches.length > 0
 
   // @ mentions (agents and files): the token ending at the caret, e.g. "fix this @exp" or `@"my dir/`.
-  const mentionMatch = slashQuery == null && !general ? /(^|\s)@("[^"\n]*|[^\s@"]*)$/.exec(draft.slice(0, caret)) : null
+  const mentionMatch = slashQuery == null && !general && !codex ? /(^|\s)@("[^"\n]*|[^\s@"]*)$/.exec(draft.slice(0, caret)) : null
   const mentionQuery = mentionMatch ? mentionMatch[2].replace(/^"/, '') : null
   const agentMatches = useMemo(
     () => (mentionQuery == null || /[/~]/.test(mentionQuery) ? [] : rankAgents(chat?.agents ?? [], mentionQuery)),
@@ -260,9 +266,9 @@ export default function Composer({ chatId }: { chatId: string }) {
 
   // Warm the CLI's file index once per runner generation.
   useEffect(() => {
-    if (general || runnerGen == null) return
+    if (general || codex || runnerGen == null) return
     void window.desktop.fileSuggestions(chatId, '')
-  }, [chatId, runnerGen, general])
+  }, [chatId, runnerGen, general, codex])
 
   // Prompt history (Up/Down like a terminal): sent prompts of this chat, newest last.
   const history = useMemo<string[]>(() => {
@@ -306,15 +312,25 @@ export default function Composer({ chatId }: { chatId: string }) {
     menuRef.current?.querySelector('.dd-item.hi')?.scrollIntoView({ block: 'nearest' })
   }, [hi, pickerOpen])
 
+  // Fresh chats can switch engine from the model picker: load the GPT list once that's possible.
+  const canLoadCodex = !general && !!chat && chat.messages.length === 0 && codexReady && codexLoggedIn
+  useEffect(() => {
+    if (canLoadCodex) void useStore.getState().loadCodexModels()
+  }, [canLoadCodex])
+
   if (!chat) return null
   const busy = chat.status === 'running' || chat.status === 'compacting'
   const hasContent = draft.trim().length > 0 || chat.attachments.length > 0
   const canSend = hasContent
 
-  const submit = (): void => {
+  const submit = (now = false): void => {
     const text = draft.trim()
     const images = chat.attachments
-    if (!text && !images.length) return
+    if (!text && !images.length) {
+      // Ctrl+Enter in an empty composer = "Send now" on the oldest queued message.
+      if (now && chat.queue.length > 0) void sendQueuedNow(chatId, chat.queue[0].id)
+      return
+    }
     histIdx.current = -1
     if (text === '/clear') {
       setDraft(chatId, '')
@@ -326,15 +342,16 @@ export default function Composer({ chatId }: { chatId: string }) {
       setColdConfirm(true)
       return
     }
-    doSend()
+    doSend(now)
   }
 
-  const doSend = (): void => {
+  const doSend = (now = false): void => {
     const text = draft.trim()
     const images = chat.attachments
     if (!text && !images.length) return
-    // While Claude works, messages wait in the queue and go out one per finished turn.
-    if (busy) enqueue(chatId, text, images)
+    // While Claude works, messages wait in the queue and go out one per finished turn; Ctrl+Enter sends at once (the CLI folds it into the running turn).
+    if (busy && now) void sendMessage(chatId, text, images, true)
+    else if (busy) enqueue(chatId, text, images)
     else void sendMessage(chatId, text, images, true)
   }
 
@@ -394,14 +411,45 @@ export default function Composer({ chatId }: { chatId: string }) {
     if (imgs.length) addAttachments(chatId, imgs)
   }
 
-  const models = chat.models.length ? chat.models : FALLBACK_MODELS
+  const models = chat.models.length ? chat.models : codex && codexModels.length ? codexModels : FALLBACK_MODELS
   const currentModel = chat.requestedModel ?? 'default'
-  const modelInfo = chat.models.find((m) => m.value.toLowerCase() === currentModel.toLowerCase())
-  const effortLevels = modelInfo?.efforts?.length ? EFFORT_LEVELS.filter((e) => modelInfo.efforts!.includes(e.value)) : EFFORT_LEVELS
+  // Codex: "default" means the user's configured model, which the init message names.
+  const infoKey = codex && currentModel === 'default' ? (chat.model ?? currentModel) : currentModel
+  const modelInfo = (chat.models.length ? chat.models : codex ? codexModels : []).find((m) => m.value.toLowerCase() === infoKey.toLowerCase())
+  const codexEffortLabel = (v: string): string => EFFORT_LEVELS.find((e) => e.value === v)?.label ?? v.charAt(0).toUpperCase() + v.slice(1)
+  const effortLevels: { value: string; label: string }[] = codex
+    ? (modelInfo?.efforts ?? []).map((v) => ({ value: v, label: codexEffortLabel(v) }))
+    : modelInfo?.efforts?.length
+      ? EFFORT_LEVELS.filter((e) => modelInfo.efforts!.includes(e.value))
+      : EFFORT_LEVELS
   // Until the CLI reports its models, assume effort is supported.
   const showEffort = !modelInfo || modelInfo.supportsEffort === true
   const currentEffort = chat.requestedEffort ?? 'default'
-  const effortName = (v?: string): string | undefined => EFFORT_LEVELS.find((e) => e.value === v)?.label ?? v
+  const effortName = (v?: string): string | undefined => (codex && v ? codexEffortLabel(v) : EFFORT_LEVELS.find((e) => e.value === v)?.label ?? v)
+  // Fresh chat: offer the other engine's models too; picking one swaps this chat for a new one of that engine.
+  const crossEngine = !general && chat.messages.length === 0 && chat.attachments.length === 0 && codexReady && codexInstalled() && codexLoggedIn
+  const otherModels = codex
+    ? (() => {
+        const known = Object.values(useStore.getState().chats).find((c) => c.engine !== 'codex' && c.models.length)?.models
+        return known ?? FALLBACK_MODELS
+      })()
+    : codexModels
+  const pickModel = async (v: string): Promise<void> => {
+    if (!v.startsWith('x:')) return void setModel(chatId, v)
+    const st = useStore.getState()
+    const draft = st.chats[chatId]?.draft ?? ''
+    const other = codex ? 'claude' : 'codex'
+    setDraft(chatId, '')
+    await newChat({
+      cwd: chat.cwd,
+      model: v.slice(2),
+      permissionMode: other === 'claude' ? st.lastMode : ((chat.requestedMode as PermissionMode) ?? st.lastMode),
+      engine: other,
+      ...(other === 'codex' ? { codexMode: st.lastCodexMode } : {}),
+    })
+    const id = useStore.getState().activeChatId
+    if (id && draft) setDraft(id, draft)
+  }
   const currentMode = (chat.permissionMode as PermissionMode) ?? chat.requestedMode
 
   return (
@@ -423,7 +471,8 @@ export default function Composer({ chatId }: { chatId: string }) {
         void addFiles([...e.dataTransfer.files])
       }}
     >
-      {!general && <TasksStrip chatId={chatId} />}
+      {codex && <AgentsMdCard chatId={chatId} />}
+      {!general && !codex && <TasksStrip chatId={chatId} />}
       {chat.queue.length > 0 && (
         <div className="queue">
           {chat.queue.map((q) => (
@@ -433,7 +482,7 @@ export default function Composer({ chatId }: { chatId: string }) {
                 {q.text || 'Image'}
               </span>
               {q.images.length > 0 && <span className="queued-meta">{q.images.length === 1 ? '1 image' : `${q.images.length} images`}</span>}
-              <button className="queued-btn" title="Send now: Claude folds it into the running turn" onClick={() => void sendQueuedNow(chatId, q.id)}>
+              <button className="queued-btn" title={`Send now: Claude folds it into the running turn (${modLabel('Ctrl+Enter')} in an empty composer)`} onClick={() => void sendQueuedNow(chatId, q.id)}>
                 <CornerDownLeft size={12} /> Send now
               </button>
               <button className="queued-x" title="Remove from queue" onClick={() => removeQueued(chatId, q.id)}>
@@ -514,7 +563,7 @@ export default function Composer({ chatId }: { chatId: string }) {
         <textarea
           ref={ta}
           value={draft}
-          placeholder={busy ? 'Claude is working — Enter queues the message, Esc stops' : general ? 'Message Claude…' : isPhone ? 'Message Claude… (/ for commands, @ for files and agents)' : 'Message Claude… (Enter to send, / for commands, @ for files and agents, paste or drop images)'}
+          placeholder={busy ? `${codex ? 'Codex' : 'Claude'} is working — Enter queues, ${modLabel('Ctrl+Enter')} sends now, Esc stops` : codex ? 'Message Codex… (Enter to send, paste or drop images)' : general ? 'Message Claude…' : isPhone ? 'Message Claude… (/ for commands, @ for files and agents)' : 'Message Claude… (Enter to send, / for commands, @ for files and agents, paste or drop images)'}
           onChange={(e) => {
             setDraft(chatId, e.target.value)
             setCaret(e.target.selectionStart)
@@ -529,7 +578,7 @@ export default function Composer({ chatId }: { chatId: string }) {
             void addFiles(files)
           }}
           onKeyDown={(e) => {
-            if (e.key === 'b' && e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey && busy) {
+            if (e.key === 'b' && e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey && busy && !codex) {
               e.preventDefault()
               void window.desktop.backgroundTasks(chatId)
               return
@@ -576,7 +625,7 @@ export default function Composer({ chatId }: { chatId: string }) {
                 }
               }
             }
-            if (e.code === 'KeyM' && e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && !pickerOpen && !general) {
+            if (e.code === 'KeyM' && e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && !pickerOpen && !general && !codex) {
               e.preventDefault()
               togglePlan()
               return
@@ -599,7 +648,7 @@ export default function Composer({ chatId }: { chatId: string }) {
             // On the phone Enter is a newline (no Shift on the on-screen keyboard); the send button sends.
             if (e.key === 'Enter' && !e.shiftKey && !isPhone) {
               e.preventDefault()
-              submit()
+              submit(e.ctrlKey || e.metaKey)
             }
           }}
           rows={1}
@@ -611,16 +660,25 @@ export default function Composer({ chatId }: { chatId: string }) {
             value={currentModel}
             labelOverride={
               currentModel === 'default' && chat.model
-                ? modelLabel(chat.model)
+                ? (codex ? models.find((m) => m.value === chat.model)?.displayName : undefined) ?? modelLabel(chat.model)
                 : currentModel !== 'default' && !models.some((m) => m.value === currentModel)
                   ? modelLabel(currentModel) // raw id (e.g. an attached chat's model) with no matching option
                   : undefined
             }
-            options={[
-              ...(models.some((m) => m.value === 'default') ? [] : [{ value: 'default', label: 'Default' }]),
-              ...models.map((m) => ({ value: m.value, label: m.displayName, description: m.description })),
-            ]}
-            onChange={(v) => void setModel(chatId, v)}
+            options={(() => {
+              const own = codex ? 'GPT · Codex' : 'Claude'
+              const sec = (name: string): { section?: string } => (crossEngine ? { section: name } : {})
+              return [
+                ...(models.some((m) => m.value === 'default') ? [] : [{ value: 'default', label: 'Default', ...sec(own) }]),
+                ...latestModels(models).map((m) => ({ value: m.value, label: m.displayName, description: m.description, ...sec(own) })),
+                ...(crossEngine
+                  ? latestModels(otherModels)
+                      .filter((m) => m.value !== 'default')
+                      .map((m) => ({ value: `x:${m.value}`, label: m.displayName, description: m.description, section: codex ? 'Claude' : 'GPT · Codex' }))
+                  : []),
+              ]
+            })()}
+            onChange={(v) => void pickModel(v)}
           />
           {showEffort && (
             <Dropdown
@@ -641,7 +699,16 @@ export default function Composer({ chatId }: { chatId: string }) {
               onChange={(v) => void setEffort(chatId, v)}
             />
           )}
-          {!general && (
+          {!general && codex && (
+            <Dropdown
+              placement="up"
+              title="Permission mode"
+              value={chat.codexMode ?? 'full-access'}
+              options={CODEX_MODES.map((m) => ({ value: m.value, label: m.label, description: m.hint }))}
+              onChange={(v) => void setMode(chatId, v as CodexMode)}
+            />
+          )}
+          {!general && !codex && (
             <Dropdown
               placement="up"
               title="Permission mode"
@@ -662,7 +729,7 @@ export default function Composer({ chatId }: { chatId: string }) {
               e.target.value = ''
             }}
           />
-          {!isPhone && (
+          {!isPhone && !codex && (
           <button
             className={`icon-btn${keepWarm ? ' on warm' : ''}${cold ? ' cold' : ''}`}
             disabled={!chat?.sessionId}
@@ -678,7 +745,7 @@ export default function Composer({ chatId }: { chatId: string }) {
             {cold ? <Snowflake size={16} /> : <Flame size={16} />}
           </button>
           )}
-          {!general && !isPhone && (
+          {!general && !isPhone && !codex && (
             <button
               className={`icon-btn remote-btn${remoteWanted ? ' on' : ''}${remote?.state === 'on' ? ' connected' : ''}${remote?.state === 'error' ? ' error' : ''}${remote?.state === 'connecting' ? ' connecting' : ''}`}
               disabled={!chat?.sessionId}
@@ -707,7 +774,7 @@ export default function Composer({ chatId }: { chatId: string }) {
             </button>
           )}
           {busy && hasContent && (
-            <button className="send queue-btn" title="Queue message (Enter)" onClick={submit}>
+            <button className="send queue-btn" title={`Queue message (Enter; ${modLabel('Ctrl+Enter')} sends now)`} onClick={() => submit()}>
               <Clock size={15} />
             </button>
           )}
@@ -716,7 +783,7 @@ export default function Composer({ chatId }: { chatId: string }) {
               <Square size={14} />
             </button>
           ) : (
-            <button className="send" title="Send" disabled={!canSend} onClick={submit}>
+            <button className="send" title="Send" disabled={!canSend} onClick={() => submit()}>
               <ArrowUp size={16} />
             </button>
           )}

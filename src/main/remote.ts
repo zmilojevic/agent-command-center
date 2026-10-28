@@ -433,7 +433,7 @@ export class RemoteManager {
   ) {}
 
   async enable(chatId: string, info: RemoteEnableInfo): Promise<void> {
-    const runner = this.runners.get(chatId)
+    const runner = this.runners.getClaude(chatId)
     if (!runner) {
       this.emit('remote:state', { chatId, state: 'error', error: 'The chat is not running' } satisfies RemoteStateEvent)
       return

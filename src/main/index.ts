@@ -6,6 +6,9 @@ import { readdir, rmdir } from 'node:fs/promises'
 import { watch } from 'chokidar'
 import { listSessions, getSessionMessages, renameSession, deleteSession } from '@anthropic-ai/claude-agent-sdk'
 import { RunnerRegistry, listAllModels } from './agent'
+import { CodexServer, codexBinary } from './codex/appServer'
+import { CodexAccountService, hasAgentsMd } from './codex/account'
+import { listCodexSessions, codexMessages, codexSessionMeta, codexRename, codexDelete, isCodexId, invalidateCodexList } from './codex/sessions'
 import { handle, on } from './ipc'
 import { registerSharedPrefs } from './sharedPrefs'
 import { readSubagentTranscript } from './subagents'
@@ -27,7 +30,7 @@ import { resourceFile } from './resources'
 import { migrateLegacyData } from './migrate'
 import { loadLoginShellEnv } from './shellEnv'
 import type { WorkflowSaveRequest } from '../shared/workflow'
-import type { StartChatOptions, PermissionResponse, PermissionMode, UserContent, NotifyRequest, Theme, RemoteEnableInfo } from '../shared/types'
+import type { StartChatOptions, PermissionResponse, PermissionMode, CodexMode, Engine, SessionMeta, UserContent, NotifyRequest, Theme, RemoteEnableInfo } from '../shared/types'
 
 // Keep the profile in <appData>/hearth (see migrate.ts for the move from agent-command-center): the packaged productName ("Hearth") must not
 // move it (on Linux this is the same path as before). An explicit --user-data-dir (test copies) wins.
@@ -70,7 +73,9 @@ const log = (s: string): void => {
 }
 // General chats run in this folder; it must exist before any runner starts.
 mkdirSync(CHATS_DIR, { recursive: true })
-const runners = new RunnerRegistry(emit, log)
+const codexServer = new CodexServer((s) => log(s), app.getVersion())
+const codexAccount = new CodexAccountService(codexServer, log, (u) => emit('codex:usageChanged', u))
+const runners = new RunnerRegistry(emit, log, codexServer)
 const remote = new RemoteManager(runners, emit, log)
 const ptys = new PtyManager(emit)
 mobileServer = new MobileServer(emit, log)
@@ -116,14 +121,21 @@ function createWindow(): void {
 
 // ---- IPC: sessions -------------------------------------------------------
 
-handle('sessions:list', async () => {
+// Codex threads live in ~/.codex (listed through the app-server). A session id is routed to Codex when the caller passes
+// engine 'codex', or (engine omitted) when the id is a known Codex thread id (seen in sessions:list or started here).
+const isCodex = (sessionId: string, engine?: Engine): boolean => engine === 'codex' || (engine === undefined && isCodexId(sessionId))
+
+handle('sessions:list', async (_ctx) => {
+  // Codex failures never break the Claude list (listCodexSessions never throws).
+  const codexRows = listCodexSessions(codexServer, log)
   const all = await listSessions({ limit: 2000 })
   // The SDK omits cwd when the first user line is huge (pasted image); read it from the transcript instead.
   const filled = await Promise.all(all.map(async (s) => (s.cwd ? s : { ...s, cwd: (await sessionCwd(s.sessionId)) ?? undefined })))
-  return filled.filter((s) => s.cwd)
+  return [...filled.filter((s) => s.cwd), ...(await codexRows)]
 })
 
-handle('sessions:messages', async (_ctx, sessionId: string, cwd?: string) => {
+handle('sessions:messages', async (_ctx, sessionId: string, cwd?: string, engine?: Engine) => {
+  if (isCodex(sessionId, engine)) return codexMessages(codexServer, sessionId)
   return getSessionMessages(sessionId, { dir: cwd })
 })
 
@@ -131,16 +143,20 @@ handle('subagent:transcript', async (_ctx, cwd: string, sessionId: string, toolU
   return readSubagentTranscript(cwd, sessionId, toolUseId, sinceMtime)
 })
 
-handle('sessions:meta', async (_ctx, items: { sessionId: string; cwd: string }[]) => {
-  const out = await Promise.all(items.map((i) => readSessionMeta(i.sessionId, i.cwd).catch(() => null)))
+handle('sessions:meta', async (_ctx, items: { sessionId: string; cwd: string; engine?: Engine }[]) => {
+  const out = await Promise.all(
+    items.map((i): Promise<SessionMeta | null> => (isCodex(i.sessionId, i.engine) ? codexSessionMeta(codexServer, i.sessionId) : readSessionMeta(i.sessionId, i.cwd).catch(() => null))),
+  )
   return out.filter(Boolean)
 })
 
-handle('sessions:rename', async (_ctx, sessionId: string, title: string, cwd?: string) => {
+handle('sessions:rename', async (_ctx, sessionId: string, title: string, cwd?: string, engine?: Engine) => {
+  if (isCodex(sessionId, engine)) return codexRename(codexServer, sessionId, title)
   await renameSession(sessionId, title, { dir: cwd })
 })
 
-handle('sessions:delete', async (_ctx, sessionId: string, cwd?: string) => {
+handle('sessions:delete', async (_ctx, sessionId: string, cwd?: string, engine?: Engine) => {
+  if (isCodex(sessionId, engine)) return codexDelete(codexServer, sessionId)
   await deleteSession(sessionId, { dir: cwd })
 })
 
@@ -149,7 +165,8 @@ handle('sessions:delete', async (_ctx, sessionId: string, cwd?: string) => {
 handle('sessions:deleteProject', async (_ctx, cwd: string, sessionIds: string[]) => {
   for (const id of sessionIds) {
     try {
-      await deleteSession(id, { dir: cwd })
+      if (isCodexId(id)) await codexDelete(codexServer, id)
+      else await deleteSession(id, { dir: cwd })
     } catch (err) {
       log(`deleteProject: ${id}: ${String(err)}`)
     }
@@ -187,7 +204,7 @@ handle('chat:setModel', (_ctx, chatId: string, model?: string) => {
   return runners.get(chatId)?.setModel(model)
 })
 handle('chat:setEffort', (_ctx, chatId: string, effort?: string) => runners.get(chatId)?.setEffort(effort))
-handle('chat:setPermissionMode', (_ctx, chatId: string, mode: PermissionMode) => {
+handle('chat:setPermissionMode', (_ctx, chatId: string, mode: PermissionMode | CodexMode) => {
   emit('remote:setting', { chatId, permissionMode: mode })
   return runners.get(chatId)?.setPermissionMode(mode)
 })
@@ -303,6 +320,16 @@ handle('app:openTerminal', (_ctx, dir: string, terminalId?: string) => openTermi
 // ---- IPC: updates and Claude login
 handle('app:checkUpdate', () => checkUpdate())
 handle('auth:status', () => authStatus())
+// ---- IPC: Codex engine (docs/codex.md)
+handle('codex:status', () => codexAccount.status())
+handle('codex:login', () => {
+  const bin = codexBinary()
+  if (!bin) return { error: 'Codex CLI not found' }
+  return { id: ptys.create(homedir(), 80, 12, { command: bin, args: ['login'], kind: 'login' }) }
+})
+handle('codex:usage', () => codexAccount.usage())
+handle('codex:models', () => codexAccount.models())
+handle('codex:hasAgentsMd', (_ctx, cwd: string) => hasAgentsMd(cwd))
 handle('auth:login', () => {
   const bin = claudeBinary()
   if (!bin) return { error: 'Claude CLI not found' }
@@ -352,6 +379,54 @@ function watchSessions(): void {
     .on('unlinkDir', ping)
 }
 
+/** Keep the Codex rate limits fresh: on rollout activity (at most every 2 min, trailing call) and hourly. Errors pause it for 10 min. */
+const CODEX_USAGE_MIN_MS = 2 * 60_000
+const CODEX_USAGE_ERR_BACKOFF_MS = 10 * 60_000
+let codexUsageLast = 0
+let codexUsageBlockedUntil = 0
+let codexUsageTimer: NodeJS.Timeout | null = null
+let codexUsageOk = false
+async function refreshCodexUsage(): Promise<void> {
+  codexUsageLast = Date.now()
+  if (Date.now() < codexUsageBlockedUntil || !codexBinary()) return
+  if (!codexUsageOk) {
+    const st = await codexAccount.status().catch(() => null)
+    if (!st?.installed || !st.loggedIn) return
+  }
+  const u = await codexAccount.usage(true)
+  if (!u || u.error) codexUsageBlockedUntil = Date.now() + CODEX_USAGE_ERR_BACKOFF_MS
+  if (u && !u.error) codexUsageOk = true
+  if (u && u.rows.length) emit('codex:usageChanged', u)
+}
+function scheduleCodexUsage(): void {
+  if (codexUsageTimer) return
+  const wait = Math.max(0, codexUsageLast + CODEX_USAGE_MIN_MS - Date.now())
+  codexUsageTimer = setTimeout(() => {
+    codexUsageTimer = null
+    void refreshCodexUsage().catch(() => {})
+  }, wait)
+}
+function startCodexUsageTimer(): void {
+  setInterval(() => void refreshCodexUsage().catch(() => {}), 60 * 60_000).unref()
+}
+
+/** Codex rollouts: ~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl. Only changes the sidebar list; never counts as Claude usage activity. */
+function watchCodexSessions(): void {
+  const dir = join(process.env.CODEX_HOME || join(homedir(), '.codex'), 'sessions')
+  if (!existsSync(dir)) return
+  let timer: NodeJS.Timeout | null = null
+  const ping = (): void => {
+    invalidateCodexList()
+    scheduleCodexUsage()
+    if (timer) clearTimeout(timer)
+    timer = setTimeout(() => emit('sessions:changed', null), 800)
+  }
+  watch(dir, { depth: 4, ignoreInitial: true })
+    .on('add', ping)
+    .on('change', ping)
+    .on('unlink', ping)
+}
+
 // One instance per user-data-dir (test copies use their own). Dev runs skip the lock.
 if (!process.env.ELECTRON_RENDERER_URL && !app.requestSingleInstanceLock()) {
   app.quit()
@@ -399,6 +474,8 @@ if (!process.env.ELECTRON_RENDERER_URL && !app.requestSingleInstanceLock()) {
       emit,
     })
     watchSessions()
+    watchCodexSessions()
+    startCodexUsageTimer()
     usageService?.start()
     void mobileServer?.start()
     app.on('activate', () => {
@@ -412,6 +489,7 @@ app.on('window-all-closed', () => {
   // With a tray the app lives on; without one the old behaviour applies.
   if (tray && !quitting) return
   runners.closeAll()
+  codexServer.stop()
   ptys.killAll()
   app.quit()
 })
@@ -419,6 +497,7 @@ app.on('before-quit', () => {
   quitting = true
   mobileServer?.stop()
   runners.closeAll()
+  codexServer.stop()
   ptys.killAll()
 })
 app.on('will-quit', () => ptys.killAll())

@@ -3,9 +3,10 @@ import { useStore, isGeneral } from '../store'
 import MessageItem from './MessageItem'
 import PermissionCard from './PermissionCard'
 import { fmtCost, fmtDuration, fmtTokens, isPhone } from '../util'
-import { AlertTriangle, Bot } from 'lucide-react'
+import { AlertTriangle, Bot, Info } from 'lucide-react'
 import { subagentLine } from './ToolCard'
 import { useNow } from '../hooks'
+import { CodexLoginCard } from './CodexCards'
 
 function SubagentsLive({ chatId, busy }: { chatId: string; busy: boolean }) {
   const all = useStore((s) => s.chats[chatId]?.subagents)
@@ -47,6 +48,11 @@ function SubagentsLive({ chatId, busy }: { chatId: string; busy: boolean }) {
 export default function ChatView({ chatId }: { chatId: string }) {
   const chat = useStore((s) => s.chats[chatId])
   const general = useStore((s) => isGeneral(s.chats[chatId]?.cwd))
+  const codexLoggedOut = useStore((s) => s.codexStatus?.loggedIn === false)
+  const writerBusy = useStore((s) => {
+    const c = s.chats[chatId]
+    return c?.engine === 'codex' && !!c.error && /already has an active writer/i.test(c.error)
+  })
   const scroller = useRef<HTMLDivElement>(null)
   const stick = useRef(true)
 
@@ -84,7 +90,7 @@ export default function ChatView({ chatId }: { chatId: string }) {
           <div className="empty-chat">
             <div className="empty-mark">✦</div>
             <h2>{general ? 'How can I help you today?' : 'What are we working on?'}</h2>
-            <p className="muted">{general ? 'Web search is on' : `Claude Code is ready in ${chat.cwd}`}</p>
+            <p className="muted">{general ? 'Web search is on' : `${chat.engine === 'codex' ? 'Codex' : 'Claude Code'} is ready in ${chat.cwd}`}</p>
           </div>
         )}
         {chat.messages.map((m, idx) => (
@@ -106,7 +112,14 @@ export default function ChatView({ chatId }: { chatId: string }) {
           </div>
         )}
         <SubagentsLive chatId={chatId} busy={busy} />
-        {chat.error && (
+        {chat.engine === 'codex' && <CodexLoginCard />}
+        {writerBusy && (
+          <div className="info-note">
+            <Info size={14} />
+            <span>This thread is open in another Codex session, probably your terminal. Quit it there, then send a message to continue here.</span>
+          </div>
+        )}
+        {chat.error && !writerBusy && !(chat.engine === 'codex' && codexLoggedOut) && (
           <div className="error-box">
             <AlertTriangle size={14} />{' '}
             {chat.error === 'authentication_failed' && !isPhone ? (
@@ -121,12 +134,12 @@ export default function ChatView({ chatId }: { chatId: string }) {
             )}
           </div>
         )}
-        {chat.closed && (
+        {chat.closed && !writerBusy && (
           <div className="muted center small">Session process ended. Send a message to start it again.</div>
         )}
         {!busy && !general && chat.lastTurn && (
           <div className="turn-stats muted small">
-            {fmtDuration(chat.lastTurn.durationMs)} · {fmtTokens(chat.lastTurn.inputTokens)} in / {fmtTokens(chat.lastTurn.outputTokens)} out · {fmtCost(chat.lastTurn.cost)} this turn
+            {fmtDuration(chat.lastTurn.durationMs)} · {fmtTokens(chat.lastTurn.inputTokens)} in / {fmtTokens(chat.lastTurn.outputTokens)} out{chat.engine === 'codex' ? '' : ` · ${fmtCost(chat.lastTurn.cost)} this turn`}
           </div>
         )}
         <div className="chat-tail" />

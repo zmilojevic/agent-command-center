@@ -13,7 +13,7 @@ export default function EmptyPane({ onNewChat }: { onNewChat: () => void }) {
       <div className="empty-card">
         <h2>Log in to get started</h2>
         <p>Hearth runs on your Claude Code login and subscription – no API key.</p>
-        <button className="btn primary" onClick={openLogin}>
+        <button className="btn primary" onClick={() => openLogin()}>
           Log in
         </button>
       </div>

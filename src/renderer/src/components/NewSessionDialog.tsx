@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { FolderOpen, X } from 'lucide-react'
-import { useStore } from '../store'
-import { PERMISSION_MODES, type PermissionMode } from '@shared/types'
-import { modelLabel, projectName, projectRoot, shortPath } from '../util'
+import { useStore, engineFor } from '../store'
+import { PERMISSION_MODES, CODEX_MODES, type PermissionMode, type CodexMode, type Engine } from '@shared/types'
+import { latestModels, modelLabel, projectName, projectRoot, shortPath } from '../util'
 import Dropdown from './Dropdown'
 
 const MODELS = [
@@ -10,7 +10,6 @@ const MODELS = [
   { value: 'fable', label: 'Fable' },
   { value: 'opus', label: 'Opus' },
   { value: 'sonnet', label: 'Sonnet' },
-  { value: 'haiku', label: 'Haiku' },
 ]
 
 export default function NewSessionDialog() {
@@ -22,18 +21,39 @@ export default function NewSessionDialog() {
   const lastModel = useStore((s) => s.lastModel)
   const lastMode = useStore((s) => s.lastMode)
   const newChat = useStore((s) => s.newChat)
+  const codexOn = useStore((s) => !!s.codexStatus?.installed)
+  const lastCodexModel = useStore((s) => s.lastCodexModel)
+  const lastCodexMode = useStore((s) => s.lastCodexMode)
+  const codexModels = useStore((s) => s.codexModels)
   const close = (): void => useStore.getState().setShowNewDialog(false)
 
   const [home, setHome] = useState('')
   const [cwd, setCwd] = useState(presetCwd ?? lastCwd)
   const [model, setModel] = useState(lastModel)
   const [mode, setMode] = useState<PermissionMode>(lastMode)
+  const [engine, setEngine] = useState<Engine>(() => engineFor(presetCwd ?? lastCwd))
+  const [codexModel, setCodexModel] = useState(lastCodexModel)
+  const [codexMode, setCodexMode] = useState<CodexMode>(lastCodexMode)
+  const codex = engine === 'codex' && codexOn
+  useEffect(() => {
+    if (codex) void useStore.getState().loadCodexModels()
+  }, [codex])
 
   // Follow the picked folder's project default (else the last used model) whenever the folder changes.
-  const defaultModel = useStore((s) => s.projectDefaults[projectRoot(cwd)]?.model)
+  const projDefaults = useStore((s) => s.projectDefaults[projectRoot(cwd)])
+  const defaultModel = projDefaults?.model
+  const defaultEngine = projDefaults?.engine === 'codex' ? 'codex' : 'claude'
   useEffect(() => {
-    setModel(defaultModel ?? lastModel)
-  }, [defaultModel, lastModel])
+    if (defaultEngine === 'codex' && codexOn) setEngine('codex')
+    else setEngine('claude')
+    setModel(defaultEngine === 'claude' ? (defaultModel ?? lastModel) : lastModel)
+    setCodexModel(defaultEngine === 'codex' ? (defaultModel ?? lastCodexModel) : lastCodexModel)
+  }, [defaultModel, defaultEngine, lastModel, lastCodexModel, codexOn])
+  const codexModelOptions = [
+    { value: 'default', label: 'Default (from ~/.codex/config.toml)' },
+    ...latestModels(codexModels).map((m) => ({ value: m.value, label: m.displayName, description: m.description })),
+    ...(codexModel !== 'default' && !codexModels.some((m) => m.value === codexModel) ? [{ value: codexModel, label: modelLabel(codexModel) }] : []),
+  ]
   const modelOptions = MODELS.some((m) => m.value === model) ? MODELS : [...MODELS, { value: model, label: modelLabel(model) }]
 
   useEffect(() => {
@@ -57,7 +77,8 @@ export default function NewSessionDialog() {
 
   const start = (): void => {
     if (!cwd.trim()) return
-    void newChat({ cwd: cwd.trim(), model, permissionMode: mode })
+    if (codex) void newChat({ cwd: cwd.trim(), model: codexModel, permissionMode: mode, engine: 'codex', codexMode })
+    else void newChat({ cwd: cwd.trim(), model, permissionMode: mode, engine: 'claude' })
   }
 
   return (
@@ -89,19 +110,46 @@ export default function NewSessionDialog() {
           </div>
         )}
 
+        {codexOn && (
+          <div className="field">
+            <span>Engine</span>
+            <div className="engine-seg" role="group" aria-label="Engine">
+              <button className={engine === 'claude' ? 'on' : ''} onClick={() => setEngine('claude')}>
+                Claude
+              </button>
+              <button className={engine === 'codex' ? 'on' : ''} onClick={() => setEngine('codex')}>
+                Codex
+              </button>
+            </div>
+          </div>
+        )}
+
         <div className="field-grid">
           <div className="field">
             <span>Model</span>
-            <Dropdown className="dd-field" value={model} options={modelOptions} onChange={setModel} />
+            {codex ? (
+              <Dropdown className="dd-field" value={codexModel} options={codexModelOptions} onChange={setCodexModel} />
+            ) : (
+              <Dropdown className="dd-field" value={model} options={modelOptions} onChange={setModel} />
+            )}
           </div>
           <div className="field">
             <span>Permissions</span>
-            <Dropdown
-              className="dd-field"
-              value={mode}
-              options={PERMISSION_MODES.map((m) => ({ value: m.value, label: m.label, description: m.hint }))}
-              onChange={(v) => setMode(v as PermissionMode)}
-            />
+            {codex ? (
+              <Dropdown
+                className="dd-field"
+                value={codexMode}
+                options={CODEX_MODES.map((m) => ({ value: m.value, label: m.label, description: m.hint }))}
+                onChange={(v) => setCodexMode(v as CodexMode)}
+              />
+            ) : (
+              <Dropdown
+                className="dd-field"
+                value={mode}
+                options={PERMISSION_MODES.map((m) => ({ value: m.value, label: m.label, description: m.hint }))}
+                onChange={(v) => setMode(v as PermissionMode)}
+              />
+            )}
           </div>
         </div>
 

@@ -153,11 +153,11 @@ export default function ContextMeter({ chat }: { chat: Chat }) {
               Auto-compacts at about {short(threshold)} ({Math.round(thresholdPct ?? 0)}%)
             </div>
           )}
-          <div className="ctx-pop-actions">
+          {chat.engine !== 'codex' && <div className="ctx-pop-actions">
             <button className="btn small-btn" onClick={compact} disabled={chat.closed || compacting || chat.status === 'starting'} title="Send /compact">
               <Minimize2 size={13} /> Compact
             </button>
-          </div>
+          </div>}
         </div>
       )}
     </div>

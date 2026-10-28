@@ -1,0 +1,131 @@
+/* Codex engine UI (docs/codex.md): engine toggle, sidebar chip, patch view, setup cards. */
+
+.engine-seg {
+  display: inline-flex;
+  align-self: flex-start;
+  border: 1px solid var(--border-2);
+  border-radius: 999px;
+  padding: 2px;
+  gap: 2px;
+  background: var(--bg);
+}
+.engine-seg button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 3px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.engine-seg button:hover {
+  color: var(--text-2);
+}
+.engine-seg button.on {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+/* Small muted "codex" chip on sidebar rows */
+.engine-chip {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0 7px;
+  line-height: 16px;
+  font-size: 11px;
+  flex-shrink: 0;
+  color: var(--muted);
+  background: transparent;
+}
+
+/* ApplyPatch: one section per file */
+.patch {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.patch-file {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.patch-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12.5px;
+  min-width: 0;
+}
+.patch-kind {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  flex-shrink: 0;
+}
+.patch-path {
+  font-family: var(--mono);
+  color: var(--hl-path);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.patch-path.openable {
+  cursor: pointer;
+}
+.patch-path.openable:hover {
+  text-decoration: underline;
+}
+.patch-move {
+  font-family: var(--mono);
+  white-space: nowrap;
+}
+.patch .diff-line.hunk {
+  color: var(--muted);
+  background: transparent;
+}
+
+/* Setup cards */
+.agents-md-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 1032px;
+  margin: 0 auto 8px max(0px, calc((100% - 1032px) / 2 - var(--chat-shift)));
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.agents-md-card > span {
+  flex: 1;
+}
+.codex-login-card > span {
+  flex: 1;
+}
+/* Engine label before a top-bar usage meter (shown when Claude and Codex meters sit side by side). */
+.usage-engine {
+  font-size: 11px;
+  color: var(--muted);
+}
+.usage-pair > .ctx-meter-wrap + .ctx-meter-wrap {
+  margin-left: 0;
+}
+.info-note {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 13px;
+  word-break: break-word;
+}
+.info-note > svg {
+  flex: none;
+  margin-top: 2px;
+}

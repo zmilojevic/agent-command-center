@@ -5,7 +5,7 @@ import type { WfAgentStep, WfField, WfFieldType, WfForEachStep, WfGraph, Workflo
 import type { ModelChoice } from '../../../../shared/types'
 import Dropdown from '../Dropdown'
 import type { DropdownOption } from '../Dropdown'
-import { modelLabel } from '../../util'
+import { latestModels, modelLabel } from '../../util'
 import { addStage, deleteStep, findStep, moveStage, renameStepId, updateAgent, updateForEach } from './graphEdit'
 
 const ID_RE = /^[a-z][a-z0-9_]*$/
@@ -157,7 +157,7 @@ function AgentFields({
   if (step.agentType && !agentOptions.some((o) => o.value === step.agentType)) agentOptions.push({ value: step.agentType, label: step.agentType, description: 'not found' })
 
   const modelOptions: DropdownOption[] = [{ value: '', label: 'Inherit' }]
-  for (const m of models) modelOptions.push({ value: m.value, label: m.displayName })
+  for (const m of latestModels(models)) modelOptions.push({ value: m.value, label: m.displayName })
   if (step.model && !modelOptions.some((o) => o.value === step.model)) modelOptions.push({ value: step.model, label: modelLabel(step.model) })
 
   const effortOptions: DropdownOption[] = [{ value: '', label: 'Inherit' }, ...EFFORTS.map((e) => ({ value: e as string, label: e }))]

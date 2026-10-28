@@ -13,6 +13,9 @@ import { homedir } from 'node:os'
 import { isAbsolute } from 'node:path'
 import { CHATS_DIR } from './paths'
 import { claudeExecutable } from './claudeBin'
+import type { Runner } from './runnerTypes'
+import type { CodexServer } from './codex/appServer'
+import { CodexRunner } from './codex/runner'
 import type { StartChatOptions, LiveChat, AttachResult, PermissionRequest, PermissionResponse, PermissionMode, ModelChoice, EffortLevel, SlashCommandInfo, AgentChoice, UserContent, McpServerInfo } from '../shared/types'
 
 /** Minimal push-based async iterable used as the streaming prompt. */
@@ -79,7 +82,7 @@ function chatSystemPrompt(): string {
   ].join(' ')
 }
 
-export class ChatRunner {
+export class ChatRunner implements Runner {
   readonly chatId: string
   private queue = new PushQueue<SDKUserMessage>()
   private q: Query | null = null
@@ -561,13 +564,13 @@ export async function listAllModels(runners: RunnerRegistry, log: (s: string) =>
 }
 
 export class RunnerRegistry {
-  private runners = new Map<string, ChatRunner>()
+  private runners = new Map<string, Runner>()
   private closing = new Map<string, Promise<void>>()
   private nextGen = 1
 
   private liveTimer: ReturnType<typeof setTimeout> | undefined
 
-  constructor(private emit: Emit, private log: (s: string) => void) {
+  constructor(private emit: Emit, private log: (s: string) => void, private codex: CodexServer) {
     // Runners kept alive only by phones are reaped once idle for 30 minutes.
     setInterval(() => this.reap(), 60_000).unref?.()
   }
@@ -632,7 +635,7 @@ export class RunnerRegistry {
       this.changed()
       return gen
     }
-    const r = new ChatRunner(opts, this.emit, this.log, gen, this.changed)
+    const r: Runner = opts.engine === 'codex' ? new CodexRunner(opts, this.codex, this.emit, this.log, gen, this.changed) : new ChatRunner(opts, this.emit, this.log, gen, this.changed)
     for (const h of inherited ?? []) r.holders.add(h)
     r.holders.add(client)
     this.runners.set(opts.chatId, r)
@@ -641,8 +644,14 @@ export class RunnerRegistry {
     return gen
   }
 
-  get(chatId: string): ChatRunner | undefined {
+  get(chatId: string): Runner | undefined {
     return this.runners.get(chatId)
+  }
+
+  /** The chat's runner when it is a Claude one (Remote Control and anything else Claude-only). */
+  getClaude(chatId: string): ChatRunner | undefined {
+    const r = this.runners.get(chatId)
+    return r instanceof ChatRunner ? r : undefined
   }
 
   /** Resolves when the chat's CLI process has exited; a repeated close awaits the same exit. */
@@ -658,9 +667,10 @@ export class RunnerRegistry {
     return p
   }
 
-  /** Any live runner (first started). */
+  /** Any live Claude runner (first started); Codex runners cannot answer Claude-account questions (models, plan usage). */
   any(): ChatRunner | undefined {
-    return this.runners.values().next().value
+    for (const r of this.runners.values()) if (r instanceof ChatRunner) return r
+    return undefined
   }
 
   closeAll(): void {

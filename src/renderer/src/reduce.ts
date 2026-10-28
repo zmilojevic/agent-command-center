@@ -778,6 +778,10 @@ export function toolSummary(b: ToolBlock): string {
       return String(i.skill ?? '')
     case 'TodoWrite':
       return 'Updated task list'
+    case 'ApplyPatch': {
+      const ch = Array.isArray(i.changes) ? (i.changes as { path?: unknown }[]) : []
+      return ch.length === 1 ? String(ch[0].path ?? '') : `${ch.length} files`
+    }
     case 'AskUserQuestion':
       return Array.isArray(i.questions) ? i.questions.map((q: any) => q.header).join(', ') : ''
     default:

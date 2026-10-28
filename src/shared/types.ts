@@ -12,6 +12,19 @@ export const PERMISSION_MODES: { value: PermissionMode; label: string; hint: str
   { value: 'bypassPermissions', label: 'Bypass permissions', hint: 'Everything runs without asking' },
 ]
 
+/** Which backend runs a chat. Codex = `codex app-server` (see docs/codex.md); absent = claude. */
+export type Engine = 'claude' | 'codex'
+
+/** Codex permission presets: `config` = leave approval/sandbox to ~/.codex/config.toml and the project's .codex/config.toml. */
+export type CodexMode = 'config' | 'read-only' | 'auto' | 'full-access'
+
+export const CODEX_MODES: { value: CodexMode; label: string; hint: string }[] = [
+  { value: 'config', label: 'Codex config', hint: 'Whatever ~/.codex/config.toml says' },
+  { value: 'read-only', label: 'Read-only', hint: 'Reads files, asks before anything else' },
+  { value: 'auto', label: 'Auto', hint: 'Edits the workspace, asks for the rest' },
+  { value: 'full-access', label: 'Full access', hint: 'No sandbox, never asks' },
+]
+
 export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
 export const EFFORT_LEVELS: { value: EffortLevel; label: string }[] = [
@@ -32,6 +45,8 @@ export interface SessionSummary {
   gitBranch?: string
   cwd?: string
   createdAt?: number
+  /** 'codex' for Codex threads (sessionId = thread id); absent = Claude. */
+  engine?: Engine
 }
 
 export interface SessionMeta {
@@ -121,8 +136,12 @@ export interface StartChatOptions {
   permissionMode: PermissionMode
   resume?: string
   fork?: boolean
-  /** Session id for a new chat; defaults to chatId. */
+  /** Session id for a new chat; defaults to chatId (Claude only: a Codex thread id is assigned by Codex). */
   sessionId?: string
+  /** Backend; defaults to claude. */
+  engine?: Engine
+  /** Codex chats only (`permissionMode` is ignored for them). */
+  codexMode?: CodexMode
 }
 
 export interface PermissionRequest {
@@ -146,7 +165,15 @@ export interface ModelChoice {
   displayName: string
   description?: string
   supportsEffort?: boolean
-  efforts?: EffortLevel[]
+  efforts?: string[]
+}
+
+export interface CodexStatus {
+  installed: boolean
+  version?: string
+  loggedIn: boolean
+  account?: { type: string; email?: string; plan?: string }
+  error?: string
 }
 
 export interface AgentEvent {
@@ -266,6 +293,8 @@ export interface LiveChat {
   model?: string
   permissionMode: PermissionMode
   holders: number
+  engine?: Engine
+  codexMode?: CodexMode
 }
 
 export interface AttachResult extends LiveChat {
@@ -297,11 +326,11 @@ export interface DesktopApi {
   /** Which client this API instance belongs to: the Electron window or the phone web UI. */
   client: 'desktop' | 'mobile'
   listSessions(): Promise<SessionSummary[]>
-  getMessages(sessionId: string, cwd?: string): Promise<TranscriptMessage[]>
+  getMessages(sessionId: string, cwd?: string, engine?: Engine): Promise<TranscriptMessage[]>
   subagentTranscript(cwd: string, sessionId: string, toolUseId: string, sinceMtime?: number): Promise<SubagentTranscript>
-  getSessionMeta(items: { sessionId: string; cwd: string }[]): Promise<SessionMeta[]>
-  renameSession(sessionId: string, title: string, cwd?: string): Promise<void>
-  deleteSession(sessionId: string, cwd?: string): Promise<void>
+  getSessionMeta(items: { sessionId: string; cwd: string; engine?: Engine }[]): Promise<SessionMeta[]>
+  renameSession(sessionId: string, title: string, cwd?: string, engine?: Engine): Promise<void>
+  deleteSession(sessionId: string, cwd?: string, engine?: Engine): Promise<void>
   /** Delete every listed transcript of a project; its folder under ~/.claude/projects goes too once empty. */
   deleteProject(cwd: string, sessionIds: string[]): Promise<void>
   /** Resolves with the new runner's generation; events of older runners carry smaller ones. */
@@ -312,7 +341,8 @@ export interface DesktopApi {
   setModel(chatId: string, model?: string): Promise<void>
   /** 'default' (or undefined) falls back to the model's default effort. */
   setEffort(chatId: string, effort?: string): Promise<void>
-  setPermissionMode(chatId: string, mode: PermissionMode): Promise<void>
+  /** Codex chats take a CodexMode here (applies from the next turn). */
+  setPermissionMode(chatId: string, mode: PermissionMode | CodexMode): Promise<void>
   /** Releases this client's hold on the chat; the runner closes when no client holds it any more. */
   closeChat(chatId: string): Promise<void>
   /** Joins an already running chat; null when no runner exists. */
@@ -338,6 +368,16 @@ export interface DesktopApi {
   authStatus(): Promise<AuthStatus>
   /** Starts `claude auth login` in a pty (data/exit via the pty events); resolves with its pty id. */
   authLogin(): Promise<{ id?: string; error?: string }>
+  // ---- Codex engine (docs/codex.md)
+  codexStatus(): Promise<CodexStatus>
+  /** Starts `codex login` in a hidden pty (same mechanism as authLogin); resolves with its pty id. */
+  codexLogin(): Promise<{ id?: string; error?: string }>
+  /** Codex rate limits (5 h / weekly windows) in the PlanUsage shape; null when unavailable. */
+  codexUsage(): Promise<PlanUsage | null>
+  codexModels(): Promise<ModelChoice[]>
+  /** Whether AGENTS.md exists in cwd or in the git root containing it. */
+  codexHasAgentsMd(cwd: string): Promise<boolean>
+  onCodexUsage(cb: (u: PlanUsage) => void): () => void
   /** Uncommitted changes (diff against HEAD plus untracked files) of the repo containing cwd. */
   gitChanges(cwd: string): Promise<GitChanges>
   notify(n: NotifyRequest): Promise<boolean>

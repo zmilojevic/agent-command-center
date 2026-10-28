@@ -2,7 +2,9 @@
 .tasks-strip {
   position: relative;
   max-width: 1032px;
-  margin: 0 auto 6px;
+  margin-bottom: 6px;
+  margin-left: max(0px, calc((100% - 1032px) / 2 - var(--chat-shift)));
+  margin-right: auto;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 5px;

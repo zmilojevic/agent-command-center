@@ -19,6 +19,7 @@ import './styles/workflows.css'
 import './styles/agent-view.css'
 import './styles/updates-auth.css'
 import './styles/usage-history.css'
+import './styles/codex.css'
 
 document.documentElement.dataset.platform = window.desktop.platform
 document.documentElement.dataset.client = window.desktop.client

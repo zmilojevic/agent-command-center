@@ -93,6 +93,8 @@ export function modelLabel(id?: string): string {
     const name = m[1][0].toUpperCase() + m[1].slice(1)
     return `${name} ${m[2]}${m[3] ? '.' + m[3] : ''}`
   }
+  // Codex models: gpt-5.6-sol -> GPT-5.6-Sol
+  if (/^gpt-/i.test(id)) return id.split('-').map((x, i) => (i === 0 ? 'GPT' : /^\d/.test(x) ? x : x[0].toUpperCase() + x.slice(1))).join('-')
   return id[0].toUpperCase() + id.slice(1)
 }
 
@@ -135,4 +137,35 @@ export function shellCommandText(code: string): string {
   const nonEmpty = lines.filter((l) => l.trim())
   if (prompted.length === nonEmpty.length) return lines.filter((l) => l.trim()).map((l) => l.slice(2)).join('\n')
   return prompted.map((l) => l.slice(2)).join('\n')
+}
+
+const cmpVersion = (a: string, b: string): number => {
+  const x = a.split('.').map(Number)
+  const y = b.split('.').map(Number)
+  for (let i = 0; i < Math.max(x.length, y.length); i++) {
+    const d = (x[i] ?? 0) - (y[i] ?? 0)
+    if (d) return d
+  }
+  return 0
+}
+
+/** Keeps only the newest model per family (Claude opus/sonnet/fable, Codex GPT sol/astra/terra/luna), drops Haiku; for dropdown option lists only. */
+export function latestModels<T extends { value: string; displayName: string }>(models: T[]): T[] {
+  const best = new Map<string, { m: T; v: string }>()
+  const parsed = models.map((m) => {
+    if (m.value === 'default') return null
+    const c = /^(opus|sonnet|fable|haiku)\s+(\d+(?:\.\d+)*)/i.exec(m.displayName)
+    const g = c ? null : /^gpt-(\d+(?:\.\d+)*)[-\s]+(.+)$/i.exec(m.displayName)
+    const hit = c ? { fam: 'c:' + c[1].toLowerCase(), v: c[2], haiku: c[1].toLowerCase() === 'haiku' } : g ? { fam: 'g:' + g[2].trim().toLowerCase(), v: g[1], haiku: false } : null
+    if (hit && !hit.haiku) {
+      const cur = best.get(hit.fam)
+      if (!cur || cmpVersion(hit.v, cur.v) > 0) best.set(hit.fam, { m, v: hit.v })
+    }
+    return hit
+  })
+  return models.filter((m, i) => {
+    const p = parsed[i]
+    if (!p) return true
+    return !p.haiku && best.get(p.fam)?.m === m
+  })
 }

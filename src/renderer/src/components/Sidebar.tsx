@@ -2,9 +2,9 @@ import type React from 'react'
 import { Fragment, useMemo, useRef, useState, useEffect } from 'react'
 import { Plus, Search, Clock, FolderGit2, FolderPlus, ChevronRight, Pencil, Trash2, GitFork, FolderOpen, Pin, PinOff, MessageSquarePlus, ChevronsDownUp, ChevronsUpDown, XCircle, FolderX, Flame, Snowflake, Check, MessageCircle, GitBranchPlus, Code, SquareTerminal, Smartphone, SlidersHorizontal, Workflow } from 'lucide-react'
 import { openFolderInEditor, openTerminalAt } from '../openIn'
-import { useStore, KEEP_WARM_MAX_IDLE_MS, isGeneral } from '../store'
-import { EFFORT_LEVELS, type SessionSummary, type LiveChat, type ModelChoice } from '@shared/types'
-import { projectName, projectRoot, worktreeOf, relativeTime, shortPath, modelLabel, defaultContextWindow, fmtTokens, fmtElapsed, isMac, isPhone } from '../util'
+import { useStore, KEEP_WARM_MAX_IDLE_MS, isGeneral, engineFor } from '../store'
+import { EFFORT_LEVELS, type SessionSummary, type LiveChat, type ModelChoice, type Engine } from '@shared/types'
+import { latestModels, projectName, projectRoot, worktreeOf, relativeTime, shortPath, modelLabel, defaultContextWindow, fmtTokens, fmtElapsed, isMac, isPhone } from '../util'
 import type { Subagent } from '../reduce'
 import { useNow } from '../hooks'
 import { useExitList, animateOut, resetOut } from '../useExitList'
@@ -121,6 +121,7 @@ export default function Sidebar() {
   const [dragging, setDragging] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState<string | null>(null)
   const newChat = useStore((s) => s.newChat)
+  const codexOn = useStore((s) => !!s.codexStatus?.installed)
   const newGeneralChat = useStore((s) => s.newGeneralChat)
   const generalDir = useStore((s) => s.generalDir)
   const lastMode = useStore((s) => s.lastMode)
@@ -213,7 +214,7 @@ export default function Sidebar() {
     for (const c of Object.values(chats)) {
       if (!c.sessionId || c.closed || known.has(c.sessionId) || hidden.has(c.sessionId)) continue
       if (q && !`${c.title} ${c.cwd === generalDir ? '' : `${c.cwd} ${projectNames[c.cwd] ?? ''}`} ${c.sessionId}`.toLowerCase().includes(q)) continue
-      const s: SessionSummary = { sessionId: c.sessionId, summary: c.title, lastModified: c.createdAt ?? 0, createdAt: c.createdAt, cwd: c.cwd }
+      const s: SessionSummary = { sessionId: c.sessionId, summary: c.title, lastModified: c.createdAt ?? 0, createdAt: c.createdAt, cwd: c.cwd, ...(c.engine === 'codex' ? { engine: 'codex' as const } : {}) }
       const root = projectRoot(c.cwd)
       let g = c.cwd === generalDir ? general : byCwd.get(root)
       if (!g) {
@@ -282,7 +283,7 @@ export default function Sidebar() {
   }
 
   useEffect(() => {
-    const items = allGroups.flatMap((g) => g.sessions.map((x) => ({ sessionId: x.sessionId, cwd: x.cwd! })))
+    const items = allGroups.flatMap((g) => g.sessions.map((x) => ({ sessionId: x.sessionId, cwd: x.cwd!, ...(x.engine ? { engine: x.engine } : {}) })))
     void loadMeta(items)
   }, [allGroups, loadMeta])
 
@@ -878,7 +879,7 @@ export default function Sidebar() {
               <XCircle size={14} /> Close chat
             </button>
           )}
-          {!isPhone && (onDisk.has(menu.s.sessionId) || openBySession[menu.s.sessionId]) && (
+          {!isPhone && menu.s.engine !== 'codex' && (onDisk.has(menu.s.sessionId) || openBySession[menu.s.sessionId]) && (
             <button
               onClick={() => {
                 const on = !keepWarm.includes(menu.s.sessionId)
@@ -891,7 +892,7 @@ export default function Sidebar() {
               {keepWarm.includes(menu.s.sessionId) && <Check size={14} style={{ marginLeft: 'auto' }} />}
             </button>
           )}
-          {!isPhone && !isGeneral(menu.s.cwd) && (onDisk.has(menu.s.sessionId) || openBySession[menu.s.sessionId]) && (
+          {!isPhone && menu.s.engine !== 'codex' && !isGeneral(menu.s.cwd) && (onDisk.has(menu.s.sessionId) || openBySession[menu.s.sessionId]) && (
             <button
               onClick={() => {
                 const on = !remoteSessions.includes(menu.s.sessionId)
@@ -970,6 +971,11 @@ export default function Sidebar() {
           <button onClick={() => { quickChat(groupMenu.g.cwd); setGroupMenu(null) }}>
             <MessageSquarePlus size={14} /> New chat here
           </button>
+          {codexOn && (
+            <button onClick={() => { void newChat({ cwd: groupMenu.g.cwd, permissionMode: lastMode, engine: engineFor(groupMenu.g.cwd) === 'codex' ? 'claude' : 'codex' }); setGroupMenu(null) }}>
+              <MessageSquarePlus size={14} /> {engineFor(groupMenu.g.cwd) === 'codex' ? 'New Claude chat' : 'New Codex chat'}
+            </button>
+          )}
           <button onClick={() => { setShowNewDialog(true, groupMenu.g.cwd); setGroupMenu(null) }}>
             <Plus size={14} /> New chat here with options…
           </button>
@@ -1165,34 +1171,54 @@ export default function Sidebar() {
 function ProjectDefaultsDialog({ cwd, name, onClose }: { cwd: string; name: string; onClose: () => void }) {
   const stored = useStore((s) => s.projectDefaults[cwd])
   const lastModel = useStore((s) => s.lastModel)
+  const lastCodexModel = useStore((s) => s.lastCodexModel)
+  const codexOn = useStore((s) => !!s.codexStatus?.installed)
+  const codexModels = useStore((s) => s.codexModels)
   const setProjectDefaults = useStore((s) => s.setProjectDefaults)
+  const [engine, setEngine] = useState<Engine>(stored?.engine === 'codex' && codexOn ? 'codex' : 'claude')
   const [model, setModel] = useState(stored?.model ?? '')
   const [effort, setEffort] = useState(stored?.effort ?? '')
-  const [models, setModels] = useState<ModelChoice[]>([])
+  const [claudeModels, setClaudeModels] = useState<ModelChoice[]>([])
+  const codex = engine === 'codex'
+  const models = codex ? codexModels : claudeModels
 
   useEffect(() => {
     let alive = true
     // Open chats already know the list; use it unless main answers with one (it may be missing after a renderer-only reload).
-    const known = Object.values(useStore.getState().chats).find((c) => c.models.length)?.models
-    if (known) setModels(known)
+    const known = Object.values(useStore.getState().chats).find((c) => c.engine !== 'codex' && c.models.length)?.models
+    if (known) setClaudeModels(known)
     void window.desktop
       .listAllModels()
-      .then((m) => alive && m.length && setModels(m))
+      .then((m) => alive && m.length && setClaudeModels(m))
       .catch(() => {})
+    void useStore.getState().loadCodexModels()
     return () => {
       alive = false
     }
   }, [])
 
+  const switchEngine = (e: Engine): void => {
+    if (e === engine) return
+    setEngine(e)
+    // Model and effort belong to the engine.
+    setModel('')
+    setEffort('')
+  }
+
   const labelOf = (v: string): string => models.find((m) => m.value === v)?.displayName ?? (v === 'default' ? 'Default' : modelLabel(v))
-  const modelOptions: { value: string; label: string; description?: string }[] = [{ value: '', label: 'Last used', description: labelOf(lastModel) }]
+  const modelOptions: { value: string; label: string; description?: string }[] = [{ value: '', label: 'Last used', description: labelOf(codex ? lastCodexModel : lastModel) }]
   if (!models.some((m) => m.value === 'default')) modelOptions.push({ value: 'default', label: 'Default' })
-  for (const m of models) modelOptions.push({ value: m.value, label: m.displayName, description: m.description })
+  for (const m of latestModels(models)) modelOptions.push({ value: m.value, label: m.displayName, description: m.description })
   if (model && !modelOptions.some((o) => o.value === model)) modelOptions.push({ value: model, label: modelLabel(model) })
 
   const info = models.find((m) => m.value.toLowerCase() === model.toLowerCase())
-  const levels = info?.efforts?.length ? EFFORT_LEVELS.filter((e) => info.efforts!.includes(e.value)) : EFFORT_LEVELS
-  const showEffort = !info || info.supportsEffort !== false
+  const effortName = (v: string): string => EFFORT_LEVELS.find((e) => e.value === v)?.label ?? v.charAt(0).toUpperCase() + v.slice(1)
+  const levels: { value: string; label: string }[] = codex
+    ? (info?.efforts ?? []).map((v) => ({ value: v, label: effortName(v) }))
+    : info?.efforts?.length
+      ? EFFORT_LEVELS.filter((e) => info.efforts!.includes(e.value))
+      : EFFORT_LEVELS
+  const showEffort = codex ? !model || model === 'default' || levels.length > 0 : !info || info.supportsEffort !== false
   const effortOptions = [
     { value: '', label: 'Last used' },
     { value: 'default', label: 'Default', description: "The model's default effort" },
@@ -1201,7 +1227,7 @@ function ProjectDefaultsDialog({ cwd, name, onClose }: { cwd: string; name: stri
   if (effort && !effortOptions.some((o) => o.value === effort)) effortOptions.push({ value: effort, label: effort })
 
   const save = (): void => {
-    setProjectDefaults(cwd, { model: model || undefined, effort: showEffort ? effort || undefined : undefined })
+    setProjectDefaults(cwd, { model: model || undefined, effort: showEffort ? effort || undefined : undefined, engine })
     onClose()
   }
 
@@ -1219,6 +1245,20 @@ function ProjectDefaultsDialog({ cwd, name, onClose }: { cwd: string; name: stri
           <h3>Default model &amp; effort</h3>
         </div>
         <p className="modal-text muted">{name}</p>
+        {codexOn && (
+          <div className="field">
+            <span>Engine</span>
+            <Dropdown
+              className="dd-field"
+              value={engine}
+              options={[
+                { value: 'claude', label: 'Claude' },
+                { value: 'codex', label: 'Codex' },
+              ]}
+              onChange={(v) => switchEngine(v as Engine)}
+            />
+          </div>
+        )}
         <div className="field">
           <span>Model</span>
           <Dropdown className="dd-field" value={model} options={modelOptions} onChange={setModel} />
@@ -1349,6 +1389,9 @@ function SessionRow({
             {Math.round(ctxFrac * 100)}%
           </span>
         )}
+        {s.engine === 'codex' ? (
+          <span className="engine-chip" title="Runs on Codex">codex</span>
+        ) : (
         <span className="cache" style={cacheStyle} title={warm ? 'Prompt cache lifetime remaining · kept warm' : 'Prompt cache lifetime remaining'}>
           {frozen ? (
             <Snowflake size={10} style={{ marginRight: 3, verticalAlign: '-1px', color: 'color-mix(in srgb, var(--ask) 80%, var(--muted))' }} />
@@ -1357,6 +1400,7 @@ function SessionRow({
           )}
           {cache}
         </span>
+        )}
         <span className="cache row-model">
           {modelLabel(model ?? (live ? chat.requestedModel : undefined))}
           {effort && <span className="row-effort"> · {effort}</span>}

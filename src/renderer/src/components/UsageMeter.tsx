@@ -44,8 +44,10 @@ function Bar({ row, big }: { row: UsageRow; big?: boolean }) {
 }
 
 /** Claude plan usage (5 h session) in the top bar; hover lists every limit. */
-export default function UsageMeter() {
-  const [usage, setUsage] = useState<PlanUsage | null>(null)
+export default function UsageMeter({ codex = false, label = false }: { codex?: boolean; label?: boolean }) {
+  const [claudeUsage, setUsage] = useState<PlanUsage | null>(null)
+  const codexUsage = useStore((s) => s.codexUsage)
+  const usage = codex ? codexUsage : claudeUsage
   const [now, setNow] = useState(Date.now())
   const [open, setOpen] = useState(false)
   const openHistory = useStore((s) => s.openUsageHistory)
@@ -66,7 +68,8 @@ export default function UsageMeter() {
     if (closeTimer.current) clearTimeout(closeTimer.current)
     if (!open) {
       setNow(Date.now())
-      if (!usage || Date.now() - usage.fetchedAt > 10 * 60_000) void window.desktop.getUsage(true).then((u) => u && setUsage(u))
+      if (codex) void window.desktop.codexUsage().then((u) => u && useStore.setState({ codexUsage: u }))
+      else if (!usage || Date.now() - usage.fetchedAt > 10 * 60_000) void window.desktop.getUsage(true).then((u) => u && setUsage(u))
     }
     setOpen(true)
   }
@@ -91,6 +94,7 @@ export default function UsageMeter() {
   return (
     <div className="ctx-meter-wrap" onMouseEnter={show} onMouseLeave={hide}>
       <div className="ctx-meter usage-meter-click" onClick={() => { setOpen(false); openHistory() }}>
+        {label && <span className="usage-engine">{codex ? 'Codex' : 'Claude'}</span>}
         <span className="ctx-meter-text">{Math.round(main.percent)}%</span>
         <Bar row={main} />
         {reset && <span className="ctx-meter-text">{reset}</span>}
@@ -98,7 +102,7 @@ export default function UsageMeter() {
       {open && (
         <div className="ctx-pop usage-pop" onMouseEnter={show} onMouseLeave={hide}>
           <div className="ctx-pop-head">
-            <span>Plan usage</span>
+            <span>{codex ? 'Codex usage' : 'Plan usage'}</span>
             <span className="muted">{sub}</span>
           </div>
           {groups.map((g) => (

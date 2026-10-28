@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { immer } from 'zustand/middleware/immer'
-import type { RemoteStateEvent, SessionSummary, LiveChat, PermissionRequest, PermissionMode, ModelChoice, EffortLevel, StartChatOptions, SessionMeta, ChatContext, SlashCommandInfo, AgentChoice, ContentBlock, UserContent, Theme, GitChanges, UpdateInfo } from '@shared/types'
+import type { RemoteStateEvent, SessionSummary, LiveChat, PermissionRequest, PermissionMode, ModelChoice, EffortLevel, Engine, CodexMode, CodexStatus, PlanUsage, StartChatOptions, SessionMeta, ChatContext, SlashCommandInfo, AgentChoice, ContentBlock, UserContent, Theme, GitChanges, UpdateInfo } from '@shared/types'
 import { applySdkMessage, applyTranscript, emptyModel, restoreLive, restoreBackgroundAgents, restoreFinishedAgents, findTool, type ChatModel, type Block } from './reduce'
 import type { WfGraph, WorkflowFile, WorkflowReadResult, WorkflowScope } from '../../shared/workflow'
 import type { ImageAttachment } from './images'
@@ -76,10 +76,14 @@ export interface Chat extends ChatModel {
   comments: ReviewComment[]
   /** Generation of the current CLI runner; events from older runners are ignored. */
   gen?: number
+  /** Backend of this chat (docs/codex.md); a new Codex chat has no sessionId until the runner's init message reports the thread id. */
+  engine: Engine
+  /** Codex chats only: permission preset (the Claude `requestedMode` is unused for them). */
+  codexMode?: CodexMode
 }
 
-function chatExtras(): Pick<Chat, 'commands' | 'agents' | 'attachments' | 'queue' | 'comments'> {
-  return { commands: [], agents: [], attachments: [], queue: [], comments: [] }
+function chatExtras(engine: Engine = 'claude', codexMode?: CodexMode): Pick<Chat, 'commands' | 'agents' | 'attachments' | 'queue' | 'comments' | 'engine' | 'codexMode'> {
+  return { commands: [], agents: [], attachments: [], queue: [], comments: [], engine, ...(engine === 'codex' ? { codexMode: codexMode ?? 'full-access' } : {}) }
 }
 
 interface State {
@@ -130,6 +134,16 @@ interface State {
   recentHours: number
   lastModel: string
   lastEffort: string
+  /** Codex has its own last-used model / effort / mode (never mixed with the Claude ones). */
+  lastCodexModel: string
+  lastCodexEffort: string
+  lastCodexMode: CodexMode
+  /** `codex:status` (checked at startup and when a Codex chat starts); null until the first answer. Every Codex option is hidden unless installed. */
+  codexStatus: CodexStatus | null
+  codexModels: ModelChoice[]
+  codexUsage: PlanUsage | null
+  checkCodex(): Promise<void>
+  loadCodexModels(): Promise<void>
   /** Per project root: default model/effort for new, resumed and worktree chats ('default' = CLI default, absent = follow last used). */
   projectDefaults: Record<string, ProjectDefaults>
   lastMode: PermissionMode
@@ -143,6 +157,7 @@ interface State {
   /** Claude Code login state from `claude auth status`; 'unknown' never blocks anything. */
   auth: 'unknown' | 'in' | 'out'
   loginOpen: boolean
+  loginProvider: 'claude' | 'codex'
   usageHistoryOpen: boolean
   theme: Theme
   diffTint: DiffTint
@@ -169,10 +184,11 @@ interface State {
 
   loadSessions(): Promise<void>
   restoreTabs(): Promise<void>
-  loadMeta(items: { sessionId: string; cwd: string }[]): Promise<void>
+  loadMeta(items: { sessionId: string; cwd: string; engine?: Engine }[]): Promise<void>
   /** Open a session in a tab; `background` leaves the active chat alone (startup restore). */
   openSession(s: SessionSummary, fork?: boolean, background?: boolean): Promise<void>
-  newChat(opts: { cwd: string; model?: string; permissionMode: PermissionMode }): Promise<void>
+  /** `engine` defaults to the project's default engine; Codex chats take `codexMode` (default: last used). */
+  newChat(opts: { cwd: string; model?: string; permissionMode: PermissionMode; engine?: Engine; codexMode?: CodexMode }): Promise<void>
   /** A general chat (no project folder) with the last-used model, effort and mode. */
   newGeneralChat(): Promise<void>
   activate(chatId: string | null): void
@@ -188,7 +204,7 @@ interface State {
   dismissUpdate(): void
   checkUpdate(): Promise<void>
   checkAuth(): Promise<void>
-  openLogin(): void
+  openLogin(provider?: 'claude' | 'codex'): void
   closeLogin(): void
   openUsageHistory(): void
   closeUsageHistory(): void
@@ -217,7 +233,8 @@ interface State {
   interrupt(chatId: string): Promise<void>
   setModel(chatId: string, model: string): Promise<void>
   setEffort(chatId: string, effort: string): Promise<void>
-  setMode(chatId: string, mode: PermissionMode): Promise<void>
+  /** Codex chats take a CodexMode. */
+  setMode(chatId: string, mode: PermissionMode | CodexMode): Promise<void>
   setDraft(chatId: string, text: string): void
   setSearch(q: string): void
   setRecentHours(h: number): void
@@ -326,18 +343,37 @@ export function isGeneral(cwd?: string): boolean {
 export interface ProjectDefaults {
   model?: string
   effort?: string
+  /** Absent = claude. model/effort belong to this engine. */
+  engine?: Engine
 }
 
-/** Model a new/resumed chat in this folder starts with: the project's default, else the last used. */
-export function modelFor(cwd: string): string {
-  const st = useStore.getState()
-  return st.projectDefaults[projectRoot(cwd)]?.model ?? st.lastModel
+/** Whether the Codex engine can be offered at all (`codex:status` says installed). */
+export function codexInstalled(): boolean {
+  return !!useStore.getState().codexStatus?.installed
 }
 
-export function effortFor(cwd: string): string {
-  const st = useStore.getState()
-  return st.projectDefaults[projectRoot(cwd)]?.effort ?? st.lastEffort
+/** Engine a new chat in this folder starts with: the project's default (claude unless Codex is installed and chosen). */
+export function engineFor(cwd: string): Engine {
+  return useStore.getState().projectDefaults[projectRoot(cwd)]?.engine === 'codex' && codexInstalled() ? 'codex' : 'claude'
 }
+
+/** Model a new/resumed chat in this folder starts with: the project's default (when it is for this engine), else the last used. */
+export function modelFor(cwd: string, engine: Engine = 'claude'): string {
+  const st = useStore.getState()
+  const d = st.projectDefaults[projectRoot(cwd)]
+  const mine = d && (d.engine ?? 'claude') === engine ? d.model : undefined
+  return mine ?? (engine === 'codex' ? st.lastCodexModel : st.lastModel)
+}
+
+export function effortFor(cwd: string, engine: Engine = 'claude'): string {
+  const st = useStore.getState()
+  const d = st.projectDefaults[projectRoot(cwd)]
+  const mine = d && (d.engine ?? 'claude') === engine ? d.effort : undefined
+  return mine ?? (engine === 'codex' ? st.lastCodexEffort : st.lastEffort)
+}
+
+/** A Codex turn failed because the login is missing or expired. */
+const CODEX_AUTH_ERROR = /unauthori[sz]ed|\b401\b|not logged in|log ?in|sign ?in|authenticat|refresh token|token (is )?(expired|invalid)/i
 
 /** Diff add/remove coloring: whole row or only the line-number gutter. */
 export type DiffTint = 'row' | 'gutter'
@@ -391,6 +427,27 @@ export const useStore = create<State>()(
     recentHours: prefs.get('recentHours', 14),
     lastModel: prefs.get('lastModel', 'default'),
     lastEffort: prefs.get('lastEffort', 'default'),
+    lastCodexModel: prefs.get('lastCodexModel', 'default'),
+    lastCodexEffort: prefs.get('lastCodexEffort', 'default'),
+    // Always start Codex sessions in full-access (like Claude's bypassPermissions); the picker can still change one session.
+    lastCodexMode: 'full-access' as CodexMode,
+    codexStatus: null,
+    codexModels: [],
+    codexUsage: null,
+    async checkCodex() {
+      const st = await window.desktop.codexStatus().catch(() => null)
+      if (!st) return
+      set((s) => void (s.codexStatus = st))
+      if (st.installed && st.loggedIn) {
+        const u = await window.desktop.codexUsage().catch(() => null)
+        if (u) set((s) => void (s.codexUsage = u))
+      }
+    },
+    async loadCodexModels() {
+      if (get().codexModels.length) return
+      const m = await window.desktop.codexModels().catch(() => [] as ModelChoice[])
+      if (m.length) set((s) => void (s.codexModels = m))
+    },
     projectDefaults: prefs.get<Record<string, ProjectDefaults>>('projectDefaults', {}),
     // Always start sessions with permissions bypassed (--dangerously-skip-permissions).
     lastMode: 'bypassPermissions' as PermissionMode,
@@ -402,6 +459,7 @@ export const useStore = create<State>()(
     update: null,
     auth: 'unknown',
     loginOpen: false,
+    loginProvider: 'claude' as const,
     usageHistoryOpen: false,
     theme: prefs.get<Theme>('theme', 'system'),
     diffTint: prefs.get<DiffTint>('diffTint', 'row'),
@@ -467,13 +525,13 @@ export const useStore = create<State>()(
       // Open in the background so a chat the user clicks meanwhile keeps the focus;
       // only the chat that was active before the restart gets activated, and only if
       // the user has not picked another one by then.
-      for (const id of saved.sessions) {
+      for (const id of new Set(saved.sessions)) {
         const sess = list.find((x) => x.sessionId === id)
         if (!sess) continue
-        if (Object.values(get().chats).some((c) => c.sessionId === id && !c.closed)) continue
+        if (Object.values(get().chats).some((c) => c.sessionId === id)) continue
         await get().openSession(sess, false, true)
         if (id === saved.active && !get().activeChatId) {
-          const chat = Object.values(get().chats).find((c) => c.sessionId === id && !c.closed)
+          const chat = Object.values(get().chats).find((c) => c.sessionId === id)
           if (chat) get().activate(chat.chatId)
         }
       }
@@ -494,6 +552,15 @@ export const useStore = create<State>()(
         if (!background) get().activate(existing.chatId)
         return
       }
+      // A chat of this session that failed or ended stays listed as closed: reuse it (it restarts on the next send)
+      // instead of piling up another chat per click.
+      if (!fork) {
+        const closed = Object.values(get().chats).find((c) => c.sessionId === sess.sessionId && c.closed)
+        if (closed) {
+          if (!background) get().activate(closed.chatId)
+          return
+        }
+      }
       if (!fork) {
         // A runner for this session already lives in the main process (started here before a reload, or by another client).
         const liveChat = (await window.desktop.liveChats().catch(() => [] as LiveChat[])).find((l) => l.sessionId === sess.sessionId)
@@ -501,9 +568,15 @@ export const useStore = create<State>()(
       }
       const chatId = crypto.randomUUID()
       const cwd = sess.cwd || (await window.desktop.homeDir())
+      const engine: Engine = sess.engine === 'codex' ? 'codex' : 'claude'
+      const codexMode = engine === 'codex' ? get().lastCodexMode : undefined
       const mode = get().lastMode
-      const model = modelFor(cwd)
-      const effort = effortFor(cwd)
+      const model = modelFor(cwd, engine)
+      const effort = effortFor(cwd, engine)
+      if (engine === 'codex') {
+        void get().checkCodex()
+        void get().loadCodexModels()
+      }
       set((s) => {
         s.chats[chatId] = {
           ...emptyModel(),
@@ -520,7 +593,7 @@ export const useStore = create<State>()(
           transcriptLoaded: false,
           draft: '',
           unread: false,
-          ...chatExtras(),
+          ...chatExtras(engine, codexMode),
         }
         s.tabs.push(chatId)
         if (background) {
@@ -531,7 +604,7 @@ export const useStore = create<State>()(
           s.recent = [chatId, ...s.recent.filter((x) => x !== chatId)]
         }
       })
-      const entries = await window.desktop.getMessages(sess.sessionId, sess.cwd)
+      const entries = await window.desktop.getMessages(sess.sessionId, sess.cwd, engine)
       set((s) => {
         const c = s.chats[chatId]
         if (!c) return
@@ -539,24 +612,36 @@ export const useStore = create<State>()(
         restoreFinishedAgents(c, entries)
         c.transcriptLoaded = true
       })
-      const opts: StartChatOptions = { chatId, cwd, permissionMode: mode, resume: sess.sessionId, fork }
+      const opts: StartChatOptions = { chatId, cwd, permissionMode: mode, resume: sess.sessionId, fork, ...(engine === 'codex' ? { engine, codexMode } : {}) }
       if (model !== 'default') opts.model = model
       if (effort !== 'default') opts.effort = effort as EffortLevel
       await startRunner(chatId, opts)
       refreshAfterStart(chatId)
     },
 
-    async newChat({ cwd, model: picked, permissionMode }) {
+    async newChat({ cwd, model: picked, permissionMode, engine: wanted, codexMode: pickedMode }) {
       const chatId = crypto.randomUUID()
-      const model = picked ?? modelFor(cwd)
-      const effort = effortFor(cwd)
-      if (picked !== undefined) prefs.set('lastModel', model)
-      prefs.set('lastMode', permissionMode)
+      const engine: Engine = (wanted ?? engineFor(cwd)) === 'codex' && codexInstalled() ? 'codex' : 'claude'
+      const codex = engine === 'codex'
+      const codexMode: CodexMode = pickedMode ?? get().lastCodexMode
+      const model = picked ?? modelFor(cwd, engine)
+      const effort = effortFor(cwd, engine)
+      if (picked !== undefined) prefs.set(codex ? 'lastCodexModel' : 'lastModel', model)
+      if (codex) prefs.set('lastCodexMode', codexMode)
+      else prefs.set('lastMode', permissionMode)
       const rootCwd = projectRoot(cwd)
       prefs.set('lastCwd', rootCwd)
+      if (codex) {
+        void get().checkCodex()
+        void get().loadCodexModels()
+      }
       set((s) => {
-        if (picked !== undefined) s.lastModel = model
-        s.lastMode = permissionMode
+        if (picked !== undefined) {
+          if (codex) s.lastCodexModel = model
+          else s.lastModel = model
+        }
+        if (codex) s.lastCodexMode = codexMode
+        else s.lastMode = permissionMode
         s.lastCwd = rootCwd
         s.chats[chatId] = {
           ...emptyModel(),
@@ -564,7 +649,8 @@ export const useStore = create<State>()(
           createdAt: Date.now(),
           title: 'New chat',
           cwd,
-          sessionId: chatId,
+          // A Codex thread id only exists once thread/start answered (system init sets it).
+          sessionId: codex ? undefined : chatId,
           pending: [],
           models: [],
           requestedModel: model,
@@ -573,7 +659,7 @@ export const useStore = create<State>()(
           transcriptLoaded: true,
           draft: '',
           unread: false,
-          ...chatExtras(),
+          ...chatExtras(engine, codexMode),
         }
         s.tabs.push(chatId)
         s.activeChatId = chatId
@@ -581,7 +667,7 @@ export const useStore = create<State>()(
         s.recent = [chatId, ...s.recent.filter((x) => x !== chatId)]
         s.showNewDialog = false
       })
-      const opts: StartChatOptions = { chatId, cwd, permissionMode }
+      const opts: StartChatOptions = { chatId, cwd, permissionMode, ...(codex ? { engine, codexMode } : {}) }
       if (model !== 'default') opts.model = model
       if (effort !== 'default') opts.effort = effort as EffortLevel
       await startRunner(chatId, opts)
@@ -687,7 +773,9 @@ export const useStore = create<State>()(
       const c = get().chats[chatId]
       if (!c) return
       await window.desktop.closeChat(chatId)
-      const sessionId = crypto.randomUUID()
+      const codex = c.engine === 'codex'
+      // A Codex thread gets its id from the runner (system init); Claude sessions get theirs here.
+      const sessionId = codex ? undefined : crypto.randomUUID()
       // The cleared chat keeps its sidebar slot: the old session is hidden and the new
       // one inherits its sort time (chains A -> B -> C keep A's slot).
       const oldId = c.sessionId
@@ -703,10 +791,11 @@ export const useStore = create<State>()(
           if (!s.hiddenSessions.includes(oldId)) s.hiddenSessions.push(oldId)
           delete s.sessionSortTime[oldId]
         }
-        s.sessionSortTime[sessionId] = keep
+        if (sessionId) s.sessionSortTime[sessionId] = keep
+        else codexSortSlot.set(chatId, keep)
         if (oldId) {
           const i = s.keepWarm.indexOf(oldId)
-          if (i >= 0) {
+          if (i >= 0 && sessionId) {
             s.keepWarm[i] = sessionId
             prefs.set('keepWarm', s.keepWarm)
           }
@@ -735,7 +824,7 @@ export const useStore = create<State>()(
           commands: x.commands,
         })
       })
-      const opts: StartChatOptions = { chatId, cwd: c.cwd, permissionMode: c.requestedMode, sessionId }
+      const opts: StartChatOptions = { chatId, cwd: c.cwd, permissionMode: c.requestedMode, ...(codex ? { engine: 'codex' as const, codexMode: c.codexMode } : { sessionId }) }
       if (c.requestedModel && c.requestedModel !== 'default') opts.model = c.requestedModel
       if (c.requestedEffort && c.requestedEffort !== 'default') opts.effort = c.requestedEffort as EffortLevel
       await startRunner(chatId, opts)
@@ -756,7 +845,7 @@ export const useStore = create<State>()(
           c.totalCost = 0 // cost counter restarts with the new CLI process
           c.error = undefined
         })
-        const opts: StartChatOptions = { chatId, cwd: before.cwd, permissionMode: before.requestedMode }
+        const opts: StartChatOptions = { chatId, cwd: before.cwd, permissionMode: before.requestedMode, ...(before.engine === 'codex' ? { engine: 'codex' as const, codexMode: before.codexMode } : {}) }
         // A chat that never got a turn has no transcript to resume yet.
         if (before.sessionId && before.messages.length) opts.resume = before.sessionId
         if (before.requestedModel && before.requestedModel !== 'default') opts.model = before.requestedModel
@@ -852,7 +941,7 @@ export const useStore = create<State>()(
       const st = get()
       for (const chat of Object.values(st.chats)) {
         const sid = chat.sessionId
-        if (chat.closed || !sid || !st.keepWarm.includes(sid)) continue
+        if (chat.closed || !sid || chat.engine === 'codex' || !st.keepWarm.includes(sid)) continue
         if (chat.status !== 'idle' || chat.pending.length) continue
         const now = Date.now()
         if (get().warming[sid] || now < (get().warmRetryAt[sid] ?? 0)) continue
@@ -925,9 +1014,12 @@ export const useStore = create<State>()(
       if (st) set((s) => void (s.auth = st.state))
     },
 
-    openLogin() {
+    openLogin(provider = 'claude') {
       if (isPhone) return
-      set((s) => void (s.loginOpen = true))
+      set((s) => {
+        s.loginProvider = provider
+        s.loginOpen = true
+      })
     },
 
     closeLogin() {
@@ -990,9 +1082,11 @@ export const useStore = create<State>()(
     },
 
     async setModel(chatId, model) {
-      prefs.set('lastModel', model)
+      const codex = get().chats[chatId]?.engine === 'codex'
+      prefs.set(codex ? 'lastCodexModel' : 'lastModel', model)
       set((s) => {
-        s.lastModel = model
+        if (codex) s.lastCodexModel = model
+        else s.lastModel = model
         const c = s.chats[chatId]
         if (c) c.requestedModel = model
       })
@@ -1000,9 +1094,11 @@ export const useStore = create<State>()(
     },
 
     async setEffort(chatId, effort) {
-      prefs.set('lastEffort', effort)
+      const codex = get().chats[chatId]?.engine === 'codex'
+      prefs.set(codex ? 'lastCodexEffort' : 'lastEffort', effort)
       set((s) => {
-        s.lastEffort = effort
+        if (codex) s.lastCodexEffort = effort
+        else s.lastEffort = effort
         const c = s.chats[chatId]
         if (!c) return
         c.requestedEffort = effort
@@ -1013,12 +1109,22 @@ export const useStore = create<State>()(
     },
 
     async setMode(chatId, mode) {
+      if (get().chats[chatId]?.engine === 'codex') {
+        prefs.set('lastCodexMode', mode)
+        set((s) => {
+          s.lastCodexMode = mode as CodexMode
+          const c = s.chats[chatId]
+          if (c) c.codexMode = mode as CodexMode
+        })
+        await window.desktop.setPermissionMode(chatId, mode)
+        return
+      }
       prefs.set('lastMode', mode)
       set((s) => {
-        s.lastMode = mode
+        s.lastMode = mode as PermissionMode
         const c = s.chats[chatId]
         if (c) {
-          c.requestedMode = mode
+          c.requestedMode = mode as PermissionMode
           c.permissionMode = mode
         }
       })
@@ -1270,7 +1376,7 @@ export const useStore = create<State>()(
     },
 
     async renameSession(sess, title) {
-      await window.desktop.renameSession(sess.sessionId, title, sess.cwd)
+      await window.desktop.renameSession(sess.sessionId, title, sess.cwd, sess.engine ?? 'claude')
       set((s) => {
         const x = s.sessions.find((y) => y.sessionId === sess.sessionId)
         if (x) x.customTitle = title
@@ -1288,7 +1394,7 @@ export const useStore = create<State>()(
         get().closeTab(c.chatId)
       }
       await Promise.all(exits)
-      await window.desktop.deleteSession(sess.sessionId, sess.cwd)
+      await window.desktop.deleteSession(sess.sessionId, sess.cwd, sess.engine ?? 'claude')
       set((s) => {
         s.sessions = s.sessions.filter((y) => y.sessionId !== sess.sessionId)
       })
@@ -1324,7 +1430,7 @@ export const useStore = create<State>()(
 
     setProjectDefaults(root, d) {
       set((s) => {
-        if (d && (d.model || d.effort)) s.projectDefaults[root] = { ...(d.model ? { model: d.model } : {}), ...(d.effort ? { effort: d.effort } : {}) }
+        if (d && (d.model || d.effort || d.engine === 'codex')) s.projectDefaults[root] = { ...(d.model ? { model: d.model } : {}), ...(d.effort ? { effort: d.effort } : {}), ...(d.engine === 'codex' ? { engine: 'codex' as const } : {}) }
         else delete s.projectDefaults[root]
         prefs.set('projectDefaults', s.projectDefaults)
       })
@@ -1343,6 +1449,8 @@ export const useStore = create<State>()(
 
 /** Chats this client closed itself; a runner kept alive by another client must not pull them back in. */
 const closedHere = new Set<string>()
+/** Codex /clear: the sort slot of the cleared row, applied once the new thread's id arrives (system init). */
+const codexSortSlot = new Map<string, number>()
 const autoAttached = new Set<string>()
 
 /** Applies a transcript to the chat, keeping messages that arrived live and are not in it. */
@@ -1368,8 +1476,9 @@ async function attachLive(chatId: string, o: { background: boolean; title?: stri
   const st = useStore.getState()
   const sess = res.sessionId ? st.sessions.find((x) => x.sessionId === res.sessionId) : undefined
   const title = o.title ?? (sess ? titleFor(sess) : 'New chat')
-  const model = res.model ?? modelFor(res.cwd)
-  const effort = effortFor(res.cwd)
+  const engine: Engine = res.engine === 'codex' ? 'codex' : 'claude'
+  const model = res.model ?? modelFor(res.cwd, engine)
+  const effort = effortFor(res.cwd, engine)
   useStore.setState((s) => {
     s.chats[chatId] = {
       ...emptyModel(),
@@ -1389,7 +1498,7 @@ async function attachLive(chatId: string, o: { background: boolean; title?: stri
       transcriptLoaded: false,
       draft: '',
       unread: false,
-      ...chatExtras(),
+      ...chatExtras(engine, res.codexMode),
     }
     s.tabs.push(chatId)
     if (o.background) s.recent = [...s.recent.filter((x) => x !== chatId), chatId]
@@ -1402,7 +1511,7 @@ async function attachLive(chatId: string, o: { background: boolean; title?: stri
   let entries: Awaited<ReturnType<Window['desktop']['getMessages']>> = []
   if (res.sessionId) {
     try {
-      entries = await window.desktop.getMessages(res.sessionId, res.cwd)
+      entries = await window.desktop.getMessages(res.sessionId, res.cwd, engine)
     } catch {
       /* a brand-new session has no transcript yet */
     }
@@ -1458,7 +1567,7 @@ async function reattachAll(): Promise<void> {
     let entries: Awaited<ReturnType<Window['desktop']['getMessages']>> | null = null
     if (sessionId) {
       try {
-        entries = await window.desktop.getMessages(sessionId, res.cwd)
+        entries = await window.desktop.getMessages(sessionId, res.cwd, useStore.getState().chats[chatId]?.engine)
       } catch {
         entries = null
       }
@@ -1522,7 +1631,7 @@ function appendUserMessage(c: Chat, uuid: string, text: string, blocks?: Block[]
 async function enableRemote(chatId: string): Promise<void> {
   const st = useStore.getState()
   const c = st.chats[chatId]
-  if (!c || c.closed || !c.sessionId || isGeneral(c.cwd)) return
+  if (!c || c.closed || !c.sessionId || c.engine === 'codex' || isGeneral(c.cwd)) return
   const sid = c.sessionId
   const branch = st.meta[sid]?.gitBranch ?? st.sessions.find((x) => x.sessionId === sid)?.gitBranch
   await window.desktop.remoteEnable(chatId, {
@@ -1561,6 +1670,7 @@ function refreshAfterStart(chatId: string): void {
     const c = useStore.getState().chats[chatId]
     if (c && !c.closed && !c.context) void window.desktop.requestContext?.(chatId)
   })
+  if (useStore.getState().chats[chatId]?.engine === 'codex') return
   void refreshCommands(chatId)
   void refreshAgents(chatId)
 }
@@ -1625,12 +1735,12 @@ function clip120(s: string): string {
   return t.length > 120 ? t.slice(0, 117) + '…' : t
 }
 
-function permissionText(req: PermissionRequest): string {
-  if (req.toolName === 'AskUserQuestion') return 'Claude has a question'
+function permissionText(req: PermissionRequest, who = 'Claude'): string {
+  if (req.toolName === 'AskUserQuestion') return `${who} has a question`
   const i = req.input as Record<string, unknown>
-  if (req.toolName === 'Bash' && typeof i.command === 'string') return clip120(`Claude wants to run ${i.command.split('\n')[0]}`)
+  if (req.toolName === 'Bash' && typeof i.command === 'string') return clip120(`${who} wants to run ${i.command.split('\n')[0]}`)
   const target = i.file_path ?? i.url ?? i.pattern
-  return clip120(`Claude wants to use ${req.toolName}${typeof target === 'string' ? ` on ${target}` : ''}`)
+  return clip120(`${who} wants to use ${req.toolName}${typeof target === 'string' ? ` on ${target}` : ''}`)
 }
 
 /** Background work (tasks, workflows, subagents) that will start another turn when it ends. */
@@ -1700,7 +1810,7 @@ export function wireEvents(): void {
   // Remember which sessions are open so they come back after a reload or restart.
   useStore.subscribe((s) => {
     if (!tabsRestored) return
-    const sessions = s.tabs.map((id) => s.chats[id]?.sessionId).filter((x): x is string => !!x)
+    const sessions = [...new Set(s.tabs.map((id) => s.chats[id]?.sessionId).filter((x): x is string => !!x))]
     const active = s.activeChatId ? (s.chats[s.activeChatId]?.sessionId ?? null) : null
     const key = JSON.stringify({ sessions, active })
     if (key === lastTabsKey) return
@@ -1770,7 +1880,14 @@ export function wireEvents(): void {
       const c = s.chats[chatId]
       if (!c) return
       applySdkMessage(c, message)
-      if (c.error === 'authentication_failed' && !isPhone) s.auth = 'out'
+      if (c.engine === 'codex') {
+        if (message.type === 'system' && message.subtype === 'init' && codexSortSlot.has(chatId) && message.session_id) {
+          s.sessionSortTime[message.session_id] = codexSortSlot.get(chatId)!
+          codexSortSlot.delete(chatId)
+          prefs.set('sessionSortTime', s.sessionSortTime)
+        }
+        if (message.type === 'result' && c.error && CODEX_AUTH_ERROR.test(c.error) && s.codexStatus) s.codexStatus.loggedIn = false
+      } else if (c.error === 'authentication_failed' && !isPhone) s.auth = 'out'
       if (message.type === 'result' && (s.activeChatId !== chatId || !document.hasFocus())) c.unread = true
       if (message.type === 'system' && message.subtype === 'commands_changed' && Array.isArray(message.commands)) {
         c.commands = message.commands.map((x: SlashCommandInfo) => ({ name: x.name, description: x.description, argumentHint: x.argumentHint, aliases: x.aliases }))
@@ -1800,7 +1917,7 @@ export function wireEvents(): void {
       c.pending.push(req)
       if (s.activeChatId !== req.chatId || !document.hasFocus()) c.unread = true
     })
-    maybeNotify(req.chatId, permissionText(req), 'attention')
+    maybeNotify(req.chatId, permissionText(req, useStore.getState().chats[req.chatId]?.engine === 'codex' ? 'Codex' : 'Claude'), 'attention')
   })
   window.desktop.onNotificationClick?.(({ chatId }) => {
     if (useStore.getState().chats[chatId]) useStore.getState().activate(chatId)
@@ -1839,6 +1956,9 @@ export function wireEvents(): void {
         c.permissionMode = permissionMode
       }
     })
+  })
+  window.desktop.onCodexUsage?.((u) => {
+    useStore.setState((s) => void (s.codexUsage = u))
   })
   window.desktop.onChatContext((ctx) => {
     useStore.setState((s) => {

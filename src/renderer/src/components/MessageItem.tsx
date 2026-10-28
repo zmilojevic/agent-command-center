@@ -58,6 +58,8 @@ export default function MessageItem({
       </div>
     )
   }
+  // Nothing to show (e.g. empty reasoning from Codex): render nothing instead of an empty, padded row.
+  if (!message.blocks.some((b) => b.kind === 'tool_use' || ((b.kind === 'text' || b.kind === 'thinking') && b.text))) return null
   return (
     <div className={`msg assistant ${continuation ? 'cont' : ''}`}>
       <div className="avatar">✦</div>

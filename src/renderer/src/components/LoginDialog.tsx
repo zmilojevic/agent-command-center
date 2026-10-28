@@ -6,8 +6,8 @@ import { ensureTerminal, mountTerminal, fitTerminal, focusTerminal, disposeTermi
 
 type Phase = 'starting' | 'running' | 'failed' | 'done'
 
-/** Runs `claude auth login` in a pty and shows it in an xterm (the CLI opens the browser and may ask for a pasted code). */
-export default function LoginDialog() {
+/** Runs `claude auth login` / `codex login` in a pty and shows it in an xterm (the CLI opens the browser and may ask for a pasted code). */
+export default function LoginDialog({ provider = 'claude' }: { provider?: 'claude' | 'codex' }) {
   const closeLogin = useStore((s) => s.closeLogin)
   const [phase, setPhase] = useState<Phase>('starting')
   const [error, setError] = useState('')
@@ -49,11 +49,13 @@ export default function LoginDialog() {
     const early: string[] = []
     const onExit = (): void => {
       setPhase('running')
-      void useStore.getState().checkAuth().then(() => {
+      const recheck = provider === 'codex' ? useStore.getState().checkCodex() : useStore.getState().checkAuth()
+      void recheck.then(() => {
         if (!alive) return
-        if (useStore.getState().auth === 'in') {
+        const st = useStore.getState()
+        if (provider === 'codex' ? st.codexStatus?.loggedIn : st.auth === 'in') {
           setPhase('done')
-          void window.desktop.getUsage(true).catch(() => null)
+          if (provider === 'claude') void window.desktop.getUsage(true).catch(() => null)
           closeLogin()
         } else setPhase('failed')
       })
@@ -65,7 +67,7 @@ export default function LoginDialog() {
     })
     setPhase('starting')
     setError('')
-    void window.desktop.authLogin().then((r) => {
+    void (provider === 'codex' ? window.desktop.codexLogin() : window.desktop.authLogin()).then((r) => {
       if (!alive) {
         if (r.id) void window.desktop.ptyKill(r.id)
         return
@@ -91,7 +93,7 @@ export default function LoginDialog() {
         if (current.current === id) current.current = null
       }
     }
-  }, [attempt, closeLogin])
+  }, [attempt, closeLogin, provider])
 
   useEffect(() => {
     const el = host.current
@@ -111,13 +113,13 @@ export default function LoginDialog() {
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && close()}>
       <div className="modal login-modal">
         <div className="modal-head">
-          <h3>Log in to Claude</h3>
+          <h3>{provider === 'codex' ? 'Log in to Codex' : 'Log in to Claude'}</h3>
           <button className="icon-btn" onClick={close} title="Close">
             <X size={16} />
           </button>
         </div>
         <p className="modal-text">
-          Hearth uses your Claude Code login. A browser window opens; if it doesn't, open the link below and paste the code you get back here.
+          {provider === 'codex' ? 'Hearth uses your Codex (ChatGPT) login.' : 'Hearth uses your Claude Code login.'} A browser window opens; if it doesn't, open the link below and paste the code you get back here.
         </p>
         {error && <p className="modal-text login-err">{error}</p>}
         <div className="login-term" ref={host} />
