@@ -493,7 +493,8 @@ function applySystem(model: ChatModel, m: any): void {
       model.model = m.model
       model.permissionMode = m.permissionMode
       if (m.effort) model.effort = m.effort
-      model.cwd = m.cwd
+      // The chat's folder is fixed when it is opened; init reports the CLI's live cwd, which follows Bash `cd`.
+      if (!model.cwd && m.cwd) model.cwd = m.cwd
       model.version = m.claude_code_version
       model.tools = m.tools
       if (Array.isArray(m.slash_commands)) model.slashCommands = m.slash_commands
