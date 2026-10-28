@@ -1,4 +1,4 @@
-import { ChevronLeft, Minus, Square, X, GitBranch, Folder, MessageCircle, FolderGit2, ArrowUpCircle } from 'lucide-react'
+import { ChevronLeft, Minus, Square, X, GitBranch, Folder, MessageCircle, FolderGit2, ArrowUpCircle, ChartColumn } from 'lucide-react'
 import { useStore, isGeneral } from '../store'
 import { projectName, shortPath, worktreeOf, modLabel, isPhone } from '../util'
 import { useEffect, useState } from 'react'
@@ -66,6 +66,12 @@ export default function TopBar() {
   const del = hasChanges ? changes!.files.reduce((n, f) => n + f.deletions, 0) : 0
   const branch = chat?.sessionId ? sessions.find((s) => s.sessionId === chat.sessionId)?.gitBranch : undefined
 
+  const historyBtn = (
+    <button className="icon-btn" title="Usage history" onClick={() => useStore.getState().openUsageHistory()}>
+      <ChartColumn size={15} />
+    </button>
+  )
+
   if (isPhone) {
     return (
       <header className="topbar phone-topbar">
@@ -76,6 +82,7 @@ export default function TopBar() {
         )}
         <span className="phone-title">{chat ? chat.title : 'Hearth'}</span>
         {chat && <ContextMeter chat={chat} />}
+        {historyBtn}
         <SettingsPopover />
       </header>
     )
@@ -83,7 +90,8 @@ export default function TopBar() {
 
   return (
     <header className="topbar drag">
-      <div className="no-drag" style={{ marginLeft: 8 }}>
+      <div className="no-drag usage-pair" style={{ marginLeft: 8 }}>
+        {historyBtn}
         <UsageMeter />
       </div>
       <div className="grow" />

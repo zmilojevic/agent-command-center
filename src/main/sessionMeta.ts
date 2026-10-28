@@ -1,4 +1,6 @@
-import { open, stat } from 'node:fs/promises'
+import { open, stat, readdir } from 'node:fs/promises'
+import { createReadStream } from 'node:fs'
+import { createInterface } from 'node:readline'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 import type { SessionMeta } from '../shared/types'
@@ -70,5 +72,69 @@ export async function readSessionMeta(sessionId: string, cwd: string): Promise<S
     return meta
   } finally {
     await fh.close()
+  }
+}
+
+const cwdFound = new Map<string, string>()
+const cwdMissing = new Map<string, number>() // sessionId -> mtimeMs of the file when no cwd was found
+const CWD_MAX_LINES = 500
+const CWD_MAX_BYTES = 16 * 1024 * 1024
+
+/**
+ * The SDK's listSessions() reads only the head of a transcript and omits `cwd` when the first user line is huge
+ * (pasted image). Streams the transcript until a line carrying `"cwd":"..."` shows up. Never throws.
+ */
+export async function sessionCwd(sessionId: string): Promise<string | null> {
+  try {
+    const known = cwdFound.get(sessionId)
+    if (known) return known
+    const root = join(homedir(), '.claude', 'projects')
+    let file: string | null = null
+    let mtimeMs = 0
+    for (const dir of await readdir(root)) {
+      const f = join(root, dir, `${sessionId}.jsonl`)
+      try {
+        const st = await stat(f)
+        if (st.isFile()) {
+          file = f
+          mtimeMs = st.mtimeMs
+          break
+        }
+      } catch {
+        /* not in this project dir */
+      }
+    }
+    if (!file) return null
+    if (cwdMissing.get(sessionId) === mtimeMs) return null
+
+    const stream = createReadStream(file, { encoding: 'utf8' })
+    const rl = createInterface({ input: stream, crlfDelay: Infinity })
+    let found: string | null = null
+    let lines = 0
+    try {
+      for await (const line of rl) {
+        const m = /"cwd":"((?:[^"\\]|\\.)*)"/.exec(line)
+        if (m) {
+          try {
+            const v = JSON.parse('"' + m[1] + '"')
+            if (typeof v === 'string' && v) {
+              found = v
+              break
+            }
+          } catch {
+            /* bad escape, keep looking */
+          }
+        }
+        if (++lines >= CWD_MAX_LINES || stream.bytesRead >= CWD_MAX_BYTES) break
+      }
+    } finally {
+      rl.close()
+      stream.destroy()
+    }
+    if (found) cwdFound.set(sessionId, found)
+    else cwdMissing.set(sessionId, mtimeMs)
+    return found
+  } catch {
+    return null
   }
 }

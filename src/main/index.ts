@@ -9,8 +9,9 @@ import { RunnerRegistry, listAllModels } from './agent'
 import { handle, on } from './ipc'
 import { registerSharedPrefs } from './sharedPrefs'
 import { readSubagentTranscript } from './subagents'
-import { readSessionMeta } from './sessionMeta'
+import { readSessionMeta, sessionCwd } from './sessionMeta'
 import { UsageService } from './usage'
+import { usageHistory } from './usageHistory'
 import { gitChanges, createWorktree, removeWorktree, gitSetStaged, gitDiscardFile, gitDiscardHunk } from './git'
 import { launchTools, openInEditor, openTerminal } from './launch'
 import { RemoteManager } from './remote'
@@ -117,7 +118,9 @@ function createWindow(): void {
 
 handle('sessions:list', async () => {
   const all = await listSessions({ limit: 2000 })
-  return all.filter((s) => s.cwd)
+  // The SDK omits cwd when the first user line is huge (pasted image); read it from the transcript instead.
+  const filled = await Promise.all(all.map(async (s) => (s.cwd ? s : { ...s, cwd: (await sessionCwd(s.sessionId)) ?? undefined })))
+  return filled.filter((s) => s.cwd)
 })
 
 handle('sessions:messages', async (_ctx, sessionId: string, cwd?: string) => {
@@ -235,6 +238,7 @@ handle('mobile:pairStart', () => mobileServer!.pairStart())
 handle('mobile:revoke', (_ctx, id: string) => mobileServer!.revoke(id))
 
 handle('usage:get', (_ctx, force?: boolean) => usageService!.get(!!force))
+handle('usage:history', () => usageHistory())
 
 // ---- IPC: desktop notifications -------------------------------------------
 

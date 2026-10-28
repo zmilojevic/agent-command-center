@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { PlanUsage, UsageRow } from '../../../shared/types'
+import { useStore } from '../store'
 import { relativeTime } from '../util'
 
 function until(iso: string | null, now: number): string {
@@ -47,6 +48,7 @@ export default function UsageMeter() {
   const [usage, setUsage] = useState<PlanUsage | null>(null)
   const [now, setNow] = useState(Date.now())
   const [open, setOpen] = useState(false)
+  const openHistory = useStore((s) => s.openUsageHistory)
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
@@ -88,7 +90,7 @@ export default function UsageMeter() {
 
   return (
     <div className="ctx-meter-wrap" onMouseEnter={show} onMouseLeave={hide}>
-      <div className="ctx-meter">
+      <div className="ctx-meter usage-meter-click" onClick={() => { setOpen(false); openHistory() }}>
         <span className="ctx-meter-text">{Math.round(main.percent)}%</span>
         <Bar row={main} />
         {reset && <span className="ctx-meter-text">{reset}</span>}

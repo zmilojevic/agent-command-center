@@ -15,6 +15,7 @@ import RightDock from './components/RightDock'
 import ToolStrip from './components/ToolStrip'
 import EmptyPane from './components/EmptyPane'
 import LoginDialog from './components/LoginDialog'
+import UsageHistoryDialog from './components/UsageHistoryDialog'
 import WorkflowsView from './components/workflows/WorkflowsView'
 import { initTerminals, focusTerminal, terminalHasFocus, setTerminalEscapeHandler } from './terminals'
 import { isPhone } from './util'
@@ -67,6 +68,7 @@ export default function App() {
   const workflowsRoot = useStore((s) => s.workflowsRoot)
   const agentView = useStore((s) => s.agentView)
   const loginOpen = useStore((s) => s.loginOpen)
+  const usageHistoryOpen = useStore((s) => s.usageHistoryOpen)
   const [agentModel, setAgentModel] = useState<string | undefined>()
 
   useEffect(() => {
@@ -314,6 +316,7 @@ export default function App() {
       </main>
       {showNewDialog && <NewSessionDialog />}
       {loginOpen && !isPhone && <LoginDialog />}
+      {usageHistoryOpen && <UsageHistoryDialog />}
       {isPhone && <ReconnectPill />}
     </div>
   )

@@ -29,6 +29,7 @@ export const INVOKES = {
   warmCache: 'chat:warm',
   requestContext: 'chat:context',
   getUsage: 'usage:get',
+  usageHistory: 'usage:history',
   checkUpdate: 'app:checkUpdate',
   authStatus: 'auth:status',
   authLogin: 'auth:login',

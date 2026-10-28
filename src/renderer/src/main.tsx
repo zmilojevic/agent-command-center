@@ -7,6 +7,7 @@ import './styles.css'
 import './styles/mentions-plan.css'
 import './styles/tasks.css'
 import './styles/mcp-worktree.css'
+import './styles/subagents-live.css'
 import './styles/changes-open.css'
 import './styles/remote.css'
 import './styles/terminal.css'
@@ -17,6 +18,7 @@ import './styles/phone.css'
 import './styles/workflows.css'
 import './styles/agent-view.css'
 import './styles/updates-auth.css'
+import './styles/usage-history.css'
 
 document.documentElement.dataset.platform = window.desktop.platform
 document.documentElement.dataset.client = window.desktop.client

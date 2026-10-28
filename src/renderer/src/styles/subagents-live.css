@@ -1,0 +1,47 @@
+.subagents-live {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-left: 38px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.subagents-live .working {
+  padding-left: 0;
+  margin-bottom: 4px;
+}
+.subagent-live-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 8px 3px 4px;
+  border-radius: 6px;
+  cursor: pointer;
+  min-width: 0;
+}
+.subagent-live-row:hover,
+.subagent-live-row:focus-visible {
+  background: var(--surface-2);
+  outline: none;
+}
+.subagent-live-row > svg {
+  flex: none;
+  color: var(--muted);
+}
+.subagent-live-desc {
+  color: var(--text-2);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 0 1 auto;
+}
+.subagent-live-line {
+  color: var(--muted);
+  font-size: 12px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 0;
+}

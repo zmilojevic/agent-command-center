@@ -174,6 +174,22 @@ export interface UsageRow {
   severity: string
   active: boolean
 }
+export interface UsageDayRow {
+  /** Local date YYYY-MM-DD. */
+  day: string
+  cwd: string
+  model: string
+  input: number
+  cacheWrite: number
+  cacheRead: number
+  output: number
+  messages: number
+}
+export interface UsageHistory {
+  rows: UsageDayRow[]
+  scannedAt: number
+  files: number
+}
 export interface PlanUsage {
   available: boolean
   subscription: string | null
@@ -317,6 +333,7 @@ export interface DesktopApi {
   warmCache(chatId: string): Promise<boolean>
   requestContext(chatId: string): Promise<void>
   getUsage(force?: boolean): Promise<PlanUsage | null>
+  usageHistory(): Promise<UsageHistory>
   checkUpdate(): Promise<UpdateInfo>
   authStatus(): Promise<AuthStatus>
   /** Starts `claude auth login` in a pty (data/exit via the pty events); resolves with its pty id. */

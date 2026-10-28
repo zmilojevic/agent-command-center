@@ -3,7 +3,46 @@ import { useStore, isGeneral } from '../store'
 import MessageItem from './MessageItem'
 import PermissionCard from './PermissionCard'
 import { fmtCost, fmtDuration, fmtTokens, isPhone } from '../util'
-import { AlertTriangle } from 'lucide-react'
+import { AlertTriangle, Bot } from 'lucide-react'
+import { subagentLine } from './ToolCard'
+import { useNow } from '../hooks'
+
+function SubagentsLive({ chatId, busy }: { chatId: string; busy: boolean }) {
+  const all = useStore((s) => s.chats[chatId]?.subagents)
+  const running = (all ?? []).filter((a) => a.status === 'running')
+  const now = useNow(running.length > 0)
+  if (running.length === 0) return null
+  return (
+    <div className="subagents-live">
+      {!busy && (
+        <div className="working">
+          <span className="spinner" />
+          {`Waiting for ${running.length} ${running.length === 1 ? 'subagent' : 'subagents'}…`}
+        </div>
+      )}
+      {running.map((a) => (
+        <div
+          key={a.toolUseId}
+          role="button"
+          tabIndex={0}
+          className="subagent-live-row"
+          title={`${a.type ? a.type + ' · ' : ''}${subagentLine(a, now)}`}
+          onClick={() => useStore.getState().openAgentView(chatId, a.toolUseId)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault()
+              useStore.getState().openAgentView(chatId, a.toolUseId)
+            }
+          }}
+        >
+          <Bot size={13} />
+          <span className="subagent-live-desc">{a.description || a.type || 'Subagent'}</span>
+          <span className="subagent-live-line">{subagentLine(a, now)}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
 
 export default function ChatView({ chatId }: { chatId: string }) {
   const chat = useStore((s) => s.chats[chatId])
@@ -66,6 +105,7 @@ export default function ChatView({ chatId }: { chatId: string }) {
             {chat.status === 'compacting' ? 'Compacting context…' : 'Working…'}
           </div>
         )}
+        <SubagentsLive chatId={chatId} busy={busy} />
         {chat.error && (
           <div className="error-box">
             <AlertTriangle size={14} />{' '}

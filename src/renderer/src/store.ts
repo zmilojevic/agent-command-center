@@ -143,6 +143,7 @@ interface State {
   /** Claude Code login state from `claude auth status`; 'unknown' never blocks anything. */
   auth: 'unknown' | 'in' | 'out'
   loginOpen: boolean
+  usageHistoryOpen: boolean
   theme: Theme
   diffTint: DiffTint
   /** Preferred editor / terminal ids ('' = first detected; editor 'system' = OS handler). */
@@ -189,6 +190,8 @@ interface State {
   checkAuth(): Promise<void>
   openLogin(): void
   closeLogin(): void
+  openUsageHistory(): void
+  closeUsageHistory(): void
   newTerminal(cwd: string): Promise<void>
   runInTerminal(cwd: string, text: string, run: boolean): Promise<void>
   killTerminal(id: string): void
@@ -399,6 +402,7 @@ export const useStore = create<State>()(
     update: null,
     auth: 'unknown',
     loginOpen: false,
+    usageHistoryOpen: false,
     theme: prefs.get<Theme>('theme', 'system'),
     diffTint: prefs.get<DiffTint>('diffTint', 'row'),
     editor: prefs.get('editor', ''),
@@ -928,6 +932,14 @@ export const useStore = create<State>()(
 
     closeLogin() {
       set((s) => void (s.loginOpen = false))
+    },
+
+    openUsageHistory() {
+      set((s) => void (s.usageHistoryOpen = true))
+    },
+
+    closeUsageHistory() {
+      set((s) => void (s.usageHistoryOpen = false))
     },
 
     setTheme(theme) {
